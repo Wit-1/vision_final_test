@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>ft_bringup</name>
+  <version>0.1.0</version>
+  <description>Configuration and launch entry points for the vision final test.</description>
+  <maintainer email="268838183+Wit-1@users.noreply.github.com">Wit</maintainer>
+  <license>BSD-3-Clause</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <exec_depend>ft_detector</exec_depend>
+  <exec_depend>roslaunch</exec_depend>
+  <exec_depend>rosparam</exec_depend>
+  <exec_depend>rosbag</exec_depend>
+  <exec_depend>rqt_image_view</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+</package>

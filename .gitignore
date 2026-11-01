@@ -1,0 +1,22 @@
+# Original assessment materials and local model/dependency files.
+/task/
+/assets/
+/.deps/
+
+# Generated catkin configuration and build outputs.
+/.catkin_tools/
+/build/
+/devel/
+/install/
+/logs/
+
+# Local experiment results and separate submission artifacts.
+/runs/
+/video/
+/dist/
+
+# Recorded data and Python caches, wherever they are generated.
+*.bag
+*.bag.active
+__pycache__/
+*.py[cod]

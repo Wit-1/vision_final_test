@@ -1,0 +1,10 @@
+# image_transport uses the base topic and appends /compressed for this transport.
+image_topic: /hk_camera/image_raw
+image_transport: compressed
+camera_info_topic: /hk_camera/camera_info
+debug_image_topic: /ft/debug/image
+
+# Keep queues small so old frames do not accumulate.
+image_queue_size: 1
+camera_info_queue_size: 1
+debug_queue_size: 1

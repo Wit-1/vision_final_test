@@ -1,0 +1,3 @@
+<launch>
+  <node pkg="ft_bringup" type="view_debug_image.sh" name="ft_image_view" output="screen" />
+</launch>

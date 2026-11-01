@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>ft_detector</name>
+  <version>0.1.0</version>
+  <description>Image input and armor detection for the vision final test.</description>
+  <maintainer email="268838183+Wit-1@users.noreply.github.com">Wit</maintainer>
+  <license>BSD-3-Clause</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>roscpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>cv_bridge</depend>
+  <depend>image_transport</depend>
+  <depend>libopencv-dev</depend>
+  <exec_depend>compressed_image_transport</exec_depend>
+</package>

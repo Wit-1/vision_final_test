@@ -1,0 +1,13 @@
+<launch>
+  <arg name="dataset" default="blue_1" />
+  <arg name="gui" default="true" />
+  <arg name="use_sim_time" default="true" />
+
+  <param name="/use_sim_time" value="$(arg use_sim_time)" />
+
+  <include file="$(find ft_bringup)/launch/detector.launch">
+    <arg name="dataset" value="$(arg dataset)" />
+  </include>
+
+  <include if="$(arg gui)" file="$(find ft_bringup)/launch/visualization.launch" />
+</launch>

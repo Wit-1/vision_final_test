@@ -1,0 +1,8 @@
+<launch>
+  <arg name="dataset" default="blue_1" />
+
+  <node pkg="ft_detector" type="ft_detector_node" name="ft_detector" output="screen" required="true">
+    <rosparam command="load" file="$(find ft_bringup)/config/detector.yaml" />
+    <rosparam command="load" file="$(find ft_bringup)/config/datasets/$(arg dataset).yaml" />
+  </node>
+</launch>

@@ -1,0 +1,3 @@
+bag_file: red_4.bag
+image_topic: /hk_camera_ca/image_raw
+camera_info_topic: /hk_camera_ca/camera_info
