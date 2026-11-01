@@ -10,6 +10,7 @@ usage() {
 在 ROS Noetic 环境中使用：
   ./run.sh check
   ./run.sh build [软件包名或 catkin build 参数]
+  ./run.sh test
   ./run.sh launch [dataset:=blue_1] [gui:=true]
   ./run.sh play <blue_1|blue_guard|red_1_3|red_4> [rosbag play 参数]
 
@@ -21,7 +22,7 @@ USAGE
 
 case "$command_name" in
     help|-h|--help) usage; exit 0 ;;
-    check|build|launch|play) ;;
+    check|build|test|launch|play) ;;
     *) usage >&2; exit 2 ;;
 esac
 
@@ -78,6 +79,12 @@ PY
         catkin config --workspace "$project_root" --extend /opt/ros/noetic -j2 \
             --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
         exec catkin build --workspace "$project_root" "$@"
+        ;;
+    test)
+        load_workspace
+        catkin build --workspace "$project_root" ft_detector --no-deps --no-status \
+            --catkin-make-args run_tests
+        exec catkin_test_results "$project_root/build/ft_detector/test_results"
         ;;
     launch)
         load_workspace
