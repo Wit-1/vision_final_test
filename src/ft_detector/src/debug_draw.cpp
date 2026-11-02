@@ -1,6 +1,8 @@
 #include "ft_detector/debug_draw.hpp"
 
 #include <algorithm>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -48,6 +50,37 @@ cv::Mat drawDetections(const cv::Mat& bgr, const DetectionResult& result, bool d
   cv::putText(debug, "Armors: " + std::to_string(result.armors.size()), cv::Point(12, 25),
               cv::FONT_HERSHEY_SIMPLEX, 0.65, cv::Scalar(0, 255, 0), 2);
   return debug;
+}
+
+void drawPoses(cv::Mat& debug, const std::vector<PnpResult>& poses,
+               const std::string& status, bool details) {
+  const auto valid = std::count_if(poses.begin(), poses.end(), [](const PnpResult& pose) { return pose.valid; });
+  cv::putText(debug, "PnP: " + status + " " + std::to_string(valid) + "/" + std::to_string(poses.size()),
+              cv::Point(12, 50), cv::FONT_HERSHEY_SIMPLEX, 0.55, cv::Scalar(0, 255, 255), 1);
+  int reason_y = 70;
+  for (const auto& result : poses) {
+    if (!result.valid) {
+      if (details) {
+        cv::putText(debug, "ID " + std::to_string(result.pose.id) + ": " + result.reason,
+                    cv::Point(12, reason_y), cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(0, 200, 255), 1);
+        reason_y += 18;
+      }
+      continue;
+    }
+    const auto& pose = result.pose;
+    const cv::Point origin = pose.axis_pixels[0];
+    const cv::Scalar colors[] = {cv::Scalar(0, 0, 255), cv::Scalar(0, 255, 0), cv::Scalar(255, 0, 0)};
+    for (std::size_t i = 0; i < 3; ++i) {
+      cv::line(debug, origin, pose.axis_pixels[i + 1], colors[i], 2, cv::LINE_AA);
+    }
+    std::ostringstream label;
+    label << std::fixed << std::setprecision(2) << "Z=" << pose.tvec[2]
+          << "m e=" << pose.reprojection_error_px << "px";
+    if (result.provisional) label << " (provisional)";
+    if (result.continuity_selected) label << " (prior)";
+    cv::putText(debug, label.str(), origin + cv::Point(0, 22), cv::FONT_HERSHEY_SIMPLEX,
+                0.45, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
+  }
 }
 
 }  // namespace ft_detector

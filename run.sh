@@ -11,7 +11,7 @@ usage() {
   ./run.sh check
   ./run.sh build [软件包名或 catkin build 参数]
   ./run.sh test
-  ./run.sh launch [dataset:=blue_1] [gui:=true]
+  ./run.sh launch [dataset:=blue_1] [gui:=true] [rviz:=false] [rviz_fixed_frame:=camera_optical_frame]
   ./run.sh play <blue_1|blue_guard|red_1_3|red_4> [rosbag play 参数]
 
 示例（两个终端使用同一数据集）：
@@ -54,7 +54,7 @@ import rospkg
 
 packages = ["roscpp", "sensor_msgs", "cv_bridge", "image_transport",
             "compressed_image_transport", "message_generation", "message_runtime",
-            "rosbag", "roslaunch", "rqt_image_view"]
+            "rosbag", "roslaunch", "rqt_image_view", "tf2", "tf2_ros", "rviz"]
 rospack = rospkg.RosPack()
 for name in packages:
     rospack.get_path(name)

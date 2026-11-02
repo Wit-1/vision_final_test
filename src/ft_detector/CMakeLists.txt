@@ -1,18 +1,26 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(ft_detector)
 
-find_package(catkin REQUIRED COMPONENTS roscpp sensor_msgs cv_bridge image_transport)
-find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc)
+find_package(catkin REQUIRED COMPONENTS
+  roscpp sensor_msgs cv_bridge image_transport
+  geometry_msgs std_msgs tf2 tf2_ros
+)
+find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc calib3d)
 
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES ft_detector_core
-  CATKIN_DEPENDS roscpp sensor_msgs cv_bridge image_transport
+  CATKIN_DEPENDS roscpp sensor_msgs cv_bridge image_transport geometry_msgs std_msgs tf2 tf2_ros
   DEPENDS OpenCV
 )
 
 # Algorithm and drawing are independent of ROS, so geometry can be tested directly.
-add_library(ft_detector_core src/traditional_detector.cpp src/debug_draw.cpp)
+add_library(ft_detector_core
+  src/traditional_detector.cpp
+  src/debug_draw.cpp
+  src/pnp_solver.cpp
+  src/pose_history.cpp
+)
 target_compile_features(ft_detector_core PUBLIC cxx_std_14)
 target_compile_options(ft_detector_core PRIVATE -Wall -Wextra)
 target_include_directories(ft_detector_core PUBLIC include ${OpenCV_INCLUDE_DIRS})
@@ -30,6 +38,16 @@ if(CATKIN_ENABLE_TESTING)
   if(TARGET detector_geometry_test)
     target_link_libraries(detector_geometry_test ft_detector_core)
     target_compile_options(detector_geometry_test PRIVATE -Wall -Wextra)
+  endif()
+  catkin_add_gtest(pnp_solver_test test/pnp_solver_test.cpp)
+  if(TARGET pnp_solver_test)
+    target_link_libraries(pnp_solver_test ft_detector_core)
+    target_compile_options(pnp_solver_test PRIVATE -Wall -Wextra)
+  endif()
+  catkin_add_gtest(pose_history_test test/pose_history_test.cpp)
+  if(TARGET pose_history_test)
+    target_link_libraries(pose_history_test ft_detector_core)
+    target_compile_options(pose_history_test PRIVATE -Wall -Wextra)
   endif()
 endif()
 

@@ -11,6 +11,10 @@
   <depend>cv_bridge</depend>
   <depend>image_transport</depend>
   <depend>libopencv-dev</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
   <exec_depend>compressed_image_transport</exec_depend>
   <test_depend>gtest</test_depend>
 </package>

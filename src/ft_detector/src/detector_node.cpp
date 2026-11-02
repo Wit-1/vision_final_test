@@ -1,19 +1,30 @@
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
+
+#include <opencv2/calib3d.hpp>
 
 #include <cv_bridge/cv_bridge.h>
+#include <geometry_msgs/TransformStamped.h>
 #include <image_transport/image_transport.h>
 #include <ros/ros.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
+#include <std_msgs/Header.h>
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2_ros/transform_broadcaster.h>
 
 #include "ft_detector/debug_draw.hpp"
+#include "ft_detector/pnp_solver.hpp"
+#include "ft_detector/pose_history.hpp"
 #include "ft_detector/traditional_detector.hpp"
 
 class DetectorNode {
@@ -26,6 +37,26 @@ class DetectorNode {
     const auto red_mask_topic = requiredParam<std::string>("red_mask_topic");
     debug_details_ = requiredParam<bool>("debug_details");
     detector_.reset(new ft_detector::TraditionalDetector(loadTraditionalParams()));
+    pnp_enabled_ = requiredParam<bool>("pnp/enabled");
+    publish_tf_ = requiredParam<bool>("pnp/publish_tf");
+    child_frame_prefix_ = requiredParam<std::string>("pnp/child_frame_prefix");
+    if (child_frame_prefix_.empty() ||
+        !std::all_of(child_frame_prefix_.begin(), child_frame_prefix_.end(),
+                     [](unsigned char c) { return std::isalnum(c) || c == '_'; })) {
+      throw std::invalid_argument("PnP child frame prefix must contain only letters, digits or underscores");
+    }
+    const auto pnp_params = loadPnpParams();
+    pnp_solver_.reset(new ft_detector::PnpSolver(pnp_params));
+    pose_continuity_enabled_ = requiredParam<bool>("pnp/continuity/enabled");
+    pose_history_.reset(new ft_detector::PoseHistory(
+        requiredParam<double>("pnp/continuity/max_gap_s"),
+        requiredParam<double>("pnp/continuity/max_corner_shift_ratio")));
+    if (pnp_enabled_ && (!pnp_params.small.confirmed || !pnp_params.large.confirmed)) {
+      if (pnp_params.allow_provisional_dimensions)
+        ROS_WARN("Provisional endpoint dimensions are enabled; pose/TF metric scale remains unverified");
+      else
+        ROS_WARN("Unconfirmed endpoint dimensions: affected armor classes will not publish a pose or TF");
+    }
     const auto transport = requiredParam<std::string>("image_transport");
     const int image_queue = requiredParam<int>("image_queue_size");
     const int camera_info_queue = requiredParam<int>("camera_info_queue_size");
@@ -93,17 +124,52 @@ class DetectorNode {
     return params;
   }
 
+  ft_detector::PnpParams loadPnpParams() const {
+    const auto dimensions = [this](const std::string& name) {
+      return ft_detector::ArmorDimensions{requiredParam<double>(name + "/width_m"),
+          requiredParam<double>(name + "/height_m"), requiredParam<bool>(name + "/confirmed")};
+    };
+    ft_detector::PnpParams params;
+    params.small = dimensions("pnp/small");
+    params.large = dimensions("pnp/large");
+    params.allow_provisional_dimensions = requiredParam<bool>("pnp/allow_provisional_dimensions");
+    params.ambiguity_error_margin_px = requiredParam<double>("pnp/continuity/error_margin_px");
+    params.min_depth_m = requiredParam<double>("pnp/min_depth_m");
+    params.max_depth_m = requiredParam<double>("pnp/max_depth_m");
+    params.max_reprojection_error_px = requiredParam<double>("pnp/max_reprojection_error_px");
+    params.min_quad_area_px2 = requiredParam<double>("pnp/min_quad_area_px2");
+    params.min_edge_length_px = requiredParam<double>("pnp/min_edge_length_px");
+    params.axis_length_m = requiredParam<double>("pnp/axis_length_m");
+    return params;
+  }
+
   void cameraInfoCallback(const sensor_msgs::CameraInfoConstPtr& message) {
     const auto finite = [](double value) { return std::isfinite(value); };
     if (message->width == 0 || message->height == 0 || message->header.frame_id.empty() ||
         message->K[0] <= 0.0 || message->K[4] <= 0.0 ||
+        message->binning_x > 1 || message->binning_y > 1 ||
+        message->roi.x_offset != 0 || message->roi.y_offset != 0 ||
+        (message->roi.width != 0 && message->roi.width != message->width) ||
+        (message->roi.height != 0 && message->roi.height != message->height) ||
         !std::all_of(message->K.begin(), message->K.end(), finite) ||
         !std::all_of(message->D.begin(), message->D.end(), finite)) {
       camera_info_.reset();
+      pose_history_->reset();
       ROS_WARN_THROTTLE(1.0, "Invalid or uncalibrated CameraInfo; calibration cache cleared");
       return;
     }
 
+    ft_detector::CameraCalibration calibration;
+    std::copy(message->K.begin(), message->K.end(), calibration.camera_matrix.val);
+    calibration.distortion.assign(message->D.begin(), message->D.end());
+    calibration.image_size = cv::Size(message->width, message->height);
+    calibration.distortion_model = message->distortion_model;
+    if (!ft_detector::PnpSolver::validCalibration(calibration)) {
+      camera_info_.reset();
+      pose_history_->reset();
+      ROS_WARN_THROTTLE(1.0, "Unsupported camera model or invalid K/D; calibration cache cleared");
+      return;
+    }
     const bool changed = !camera_info_ || message->width != camera_info_->width ||
                          message->height != camera_info_->height ||
                          message->header.frame_id != camera_info_->header.frame_id ||
@@ -111,7 +177,9 @@ class DetectorNode {
                          message->K != camera_info_->K || message->D != camera_info_->D;
     // 保留完整 CameraInfo；K、D、尺寸和 frame_id 供后续 PnP 使用。
     camera_info_ = message;
+    calibration_ = calibration;
     if (changed) {
+      pose_history_->reset();
       ROS_INFO_STREAM("CameraInfo cached: " << message->width << "x" << message->height
                                             << " frame=" << message->header.frame_id
                                             << " fx=" << message->K[0] << " fy=" << message->K[4]
@@ -121,11 +189,46 @@ class DetectorNode {
     }
   }
 
+  void publishTransforms(const std::vector<ft_detector::PnpResult>& poses,
+                         const std_msgs::Header& image_header) {
+    std::vector<geometry_msgs::TransformStamped> transforms;
+    for (const auto& result : poses) {
+      if (!result.valid) continue;
+      const auto& pose = result.pose;
+      cv::Matx33d rotation;
+      cv::Rodrigues(pose.rvec, rotation);
+      const tf2::Matrix3x3 basis(rotation(0, 0), rotation(0, 1), rotation(0, 2),
+                                 rotation(1, 0), rotation(1, 1), rotation(1, 2),
+                                 rotation(2, 0), rotation(2, 1), rotation(2, 2));
+      tf2::Quaternion quaternion;
+      basis.getRotation(quaternion);
+      quaternion.normalize();
+      geometry_msgs::TransformStamped transform;
+      transform.header = image_header;
+      transform.header.frame_id = camera_info_->header.frame_id;
+      transform.child_frame_id = child_frame_prefix_ + std::to_string(pose.id);
+      if (transform.child_frame_id == transform.header.frame_id) {
+        ROS_ERROR_THROTTLE(1.0, "Armor child frame must differ from camera parent frame");
+        continue;
+      }
+      transform.transform.translation.x = pose.tvec[0];
+      transform.transform.translation.y = pose.tvec[1];
+      transform.transform.translation.z = pose.tvec[2];
+      transform.transform.rotation.x = quaternion.x();
+      transform.transform.rotation.y = quaternion.y();
+      transform.transform.rotation.z = quaternion.z();
+      transform.transform.rotation.w = quaternion.w();
+      transforms.push_back(transform);
+    }
+    if (!transforms.empty()) tf_broadcaster_.sendTransform(transforms);
+  }
+
   void imageCallback(const sensor_msgs::ImageConstPtr& message) {
     try {
       // 编码相同时共享解码后的像素；压缩解码和发布输出仍有各自的数据分配。
       const auto shared_image = cv_bridge::toCvShare(message, sensor_msgs::image_encodings::BGR8);
       if (shared_image->image.empty()) {
+        pose_history_->reset();
         ROS_WARN_THROTTLE(1.0, "Empty image received; frame skipped");
         return;
       }
@@ -134,11 +237,36 @@ class DetectorNode {
                                      camera_info_->height == message->height &&
                                      camera_info_->header.frame_id == message->header.frame_id;
       if (!calibration_ready) {
+        pose_history_->reset();
         ROS_WARN_THROTTLE(1.0, "No matching CameraInfo; 2D detection continues while calibration is unavailable");
       }
 
       const auto result = detector_->detect(shared_image->image);
-      const auto annotated = ft_detector::drawDetections(shared_image->image, result, debug_details_);
+      std::vector<ft_detector::PnpResult> poses;
+      std::string pnp_status = "disabled";
+      if (pnp_enabled_) {
+        pnp_status = "awaiting_camera_info";
+        if (calibration_ready) {
+          std::vector<const ft_detector::ArmorPose*> references(result.armors.size(), nullptr);
+          if (pose_continuity_enabled_)
+            references = pose_history_->references(result.armors, message->header.stamp.toSec());
+          for (std::size_t i = 0; i < result.armors.size(); ++i)
+            poses.push_back(pnp_solver_->solve(result.armors[i], calibration_, references[i]));
+          // 求完整帧后再更新历史，避免前面返回的参考指针提前失效。
+          if (pose_continuity_enabled_)
+            pose_history_->store(result.armors, poses, message->header.stamp.toSec());
+          pnp_status = poses.empty() ? "no_candidates" : poses.front().reason;
+          if (std::any_of(poses.begin(), poses.end(), [](const ft_detector::PnpResult& pose) { return pose.valid; })) {
+            const bool provisional = std::any_of(poses.begin(), poses.end(),
+                [](const ft_detector::PnpResult& pose) { return pose.valid && pose.provisional; });
+            pnp_status = provisional ? "provisional" : "ready";
+          }
+          if (publish_tf_) publishTransforms(poses, message->header);
+        }
+      }
+      if (!pnp_enabled_ || !pose_continuity_enabled_) pose_history_->reset();
+      auto annotated = ft_detector::drawDetections(shared_image->image, result, debug_details_);
+      ft_detector::drawPoses(annotated, poses, pnp_status, debug_details_);
       debug_publisher_.publish(cv_bridge::CvImage(
           message->header, sensor_msgs::image_encodings::BGR8, annotated).toImageMsg());
       blue_mask_publisher_.publish(cv_bridge::CvImage(
@@ -150,12 +278,15 @@ class DetectorNode {
                                                      << "x" << message->height
                                                      << " lights=" << result.lights.size()
                                                      << " armors=" << result.armors.size()
+                                                     << " pnp=" << pnp_status
                                                      << " frame=" << message->header.frame_id
                                                      << " calibration="
                                                      << (calibration_ready ? "ready" : "unavailable"));
     } catch (const cv_bridge::Exception& error) {
+      pose_history_->reset();
       ROS_ERROR_STREAM("Image conversion failed: " << error.what());
     } catch (const cv::Exception& error) {
+      pose_history_->reset();
       ROS_ERROR_STREAM("OpenCV image processing failed: " << error.what());
     }
   }
@@ -166,6 +297,13 @@ class DetectorNode {
   image_transport::Publisher debug_publisher_;
   image_transport::Publisher blue_mask_publisher_, red_mask_publisher_;
   std::unique_ptr<ft_detector::TraditionalDetector> detector_;
+  std::unique_ptr<ft_detector::PnpSolver> pnp_solver_;
+  std::unique_ptr<ft_detector::PoseHistory> pose_history_;
+  ft_detector::CameraCalibration calibration_;
+  tf2_ros::TransformBroadcaster tf_broadcaster_;
+  bool pnp_enabled_ = false, publish_tf_ = false;
+  bool pose_continuity_enabled_ = false;
+  std::string child_frame_prefix_;
   bool debug_details_ = false;
   image_transport::Subscriber image_subscriber_;
   ros::Subscriber camera_info_subscriber_;
