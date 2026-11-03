@@ -4,7 +4,7 @@
 
 ## 环境与构建
 
-环境：Ubuntu 20.04、ROS Noetic、OpenCV 4.x（已验证 4.2.0）及 catkin tools。需安装 compressed_image_transport、cv_bridge、tf2_ros、rqt_image_view、RViz、Python YAML；测试另需 gtest、rostest 和 Python OpenCV/NumPy。包级依赖见各包的 package.xml。
+环境：Ubuntu 20.04、ROS Noetic、OpenCV 4.x（已验证 4.2.0）及 catkin tools。需安装 compressed_image_transport、cv_bridge、tf2_ros、dynamic_reconfigure、rqt_image_view、rqt_reconfigure、RViz、Python YAML；测试另需 gtest、rostest 和 Python OpenCV/NumPy。包级依赖见各包的 package.xml。
 
 在项目根目录执行：
 
@@ -68,7 +68,7 @@ rosbag play --clock task/red_4.bag --topics /hk_camera/image_raw/compressed /hk_
 
 ## 参数与输出
 
-公共话题、HSV、几何及 PnP 参数位于 [detector.yaml](src/ft_bringup/config/detector.yaml)，bag 文件名位于 [datasets/](src/ft_bringup/config/datasets)。公共参数先加载，数据集参数覆盖同名键；修改后重启。`debug_details: true` 可显示灯条下标和拒绝原因，在线调参将在第 5 点实现。
+公共话题、HSV、几何及 PnP 参数位于 [detector.yaml](src/ft_bringup/config/detector.yaml)，bag 文件名位于 [datasets/](src/ft_bringup/config/datasets)。公共参数先加载，数据集参数覆盖同名键。修改 YAML 后重启；其中 tuning 的 21 项也可在线调整。`debug_details: true` 可显示灯条下标和拒绝原因。
 
 四份素材共用 `/hk_camera/image_raw/compressed` 和 `/hk_camera/camera_info`；回放仅提供相机输入和 `/clock`。
 
@@ -96,6 +96,20 @@ rostopic echo --filter 'len(m.detections) > 0' -n 1 /ft/detection
 [tracker.yaml](src/ft_bringup/config/tracker.yaml) 配置六维匀速卡尔曼滤波：状态为位置和速度，dt 来自图像时间戳。Q 采用随 dt 积分的白加速度噪声，q=2 m²/s³；R 初值为 0.0025 m²（位置标准差 5 cm），用于在观测抖动和响应速度间取一个试验起点。0.5 m 关联门限取题面建议的较宽端，后续结合目标速度和 PnP 抖动调整，均未由真值标定。
 
 首次选最近目标，之后在预测位置附近关联并保持锁定；漏检时 `tracking=false`，超过 0.5 s 删除。`id=0` 表示无轨迹，正 ID 表示已有轨迹；轨迹 ID 与帧内检测 ID 不同。`position_predict=position+T*velocity`，默认 T=0.1 s；模型、参数单位和已知限制见[设计说明](docs/design.md#单装甲板平移跟踪)。
+
+## 在线调参
+
+运行链路后，在另一个 Noetic 终端加载环境并打开 rqt：
+
+```bash
+source /opt/ros/noetic/setup.bash
+source devel/setup.bash
+rosrun rqt_reconfigure rqt_reconfigure
+```
+
+选择 `/ft_detector/tuning`，可调整蓝色、红色低/高区间的 HSV 上下限、最小轮廓面积、配对最大归一化间距和角度差。滑块释放后生效；不合法组合会恢复上一次有效值。当前值及“Set to Default”来自启动时的 YAML，在线修改不会写回文件，需保留时手动更新 tuning 分组。其他参数（含跟踪 Q/R、关联门限和 T）修改 YAML 后重启。
+
+真实 blue_1 同帧对照：blue_v_min 从 130 提高到 240，蓝色掩膜像素 2795→1686，检测 2→0；恢复后结果恢复。red_4 的 red_low_v_min 从 210 提高到 255，红色像素 1023→556，检测仍为 1，说明掩膜收紧不一定丢检。完整记录及验证范围见[验收记录](docs/acceptance.md)。
 
 ## 当前限制与排查
 

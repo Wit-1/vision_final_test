@@ -54,7 +54,8 @@ import rospkg
 
 packages = ["roscpp", "rospy", "sensor_msgs", "cv_bridge", "image_transport",
             "compressed_image_transport", "message_generation", "message_runtime",
-            "rosbag", "roslaunch", "rqt_image_view", "tf2", "tf2_ros", "rviz", "rostest", "visualization_msgs"]
+            "rosbag", "roslaunch", "rqt_image_view", "rqt_reconfigure", "dynamic_reconfigure",
+            "tf2", "tf2_ros", "rviz", "rostest", "visualization_msgs"]
 rospack = rospkg.RosPack()
 for name in packages:
     rospack.get_path(name)

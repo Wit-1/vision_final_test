@@ -1,0 +1,2 @@
+# Deliberately different from Detector.cfg's 130, to verify YAML startup precedence.
+blue_v_min: 220

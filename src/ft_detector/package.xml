@@ -11,6 +11,7 @@
   <depend>cv_bridge</depend>
   <depend>image_transport</depend>
   <depend>ft_detection</depend>
+  <depend>dynamic_reconfigure</depend>
   <depend>libopencv-dev</depend>
   <depend>geometry_msgs</depend>
   <depend>std_msgs</depend>

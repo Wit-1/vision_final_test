@@ -66,6 +66,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   │   │   ├── pnp_solver.hpp
 │   │   │   ├── pose_history.hpp       # 上一帧位姿参考和唯一几何匹配
 │   │   │   ├── detection_output.hpp   # ROS 检测消息和 TF 的共同输出接口
+│   │   │   ├── tuning_parameters.hpp  # 算法参数与动态配置的转换
 │   │   │   ├── debug_draw.hpp
 │   │   │   └── nn_detector.hpp
 │   │   ├── src/
@@ -74,6 +75,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   │   │   ├── pnp_solver.cpp
 │   │   │   ├── pose_history.cpp       # 双解消歧所用历史的匹配与失效清理
 │   │   │   ├── detection_output.cpp   # 字段检查、共享四元数与消息构造
+│   │   │   ├── tuning_parameters.cpp  # 保留静态字段、转换 21 项在线参数
 │   │   │   ├── debug_draw.cpp
 │   │   │   └── nn_detector.cpp
 │   │   ├── cfg/
@@ -130,7 +132,12 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │       │   └── vision.rviz
 │       └── test/
 │           ├── pipeline.test
-│           └── pipeline_test.py      # 消息、时间戳和连接的集成检查
+│           ├── pipeline_test.py      # 消息、时间戳和连接的集成检查
+│           ├── tracker.test
+│           ├── tracker_test.py       # 跟踪生命周期和 marker 检查
+│           ├── tuning.test
+│           ├── tuning_test.py        # YAML 初值、21 项实际效果及回退
+│           └── tuning_override.yaml  # 测试专用的不同启动值
 │
 ├── tools/                            # 开发辅助工具，不参与在线算法
 │   ├── prepare_model.py              # 原模型检查、节点排序、哈希记录
@@ -256,3 +263,5 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 - **第 4 点：**按本人“commit 后整理第四点任务文件”的要求集中搭建 4.1～4.4。新增共享消息/TF 输出适配层、12 项字段单测和两份管线集成测试文件，补齐节点发布、空帧和角点编号。71 项 C++ 单元用例、1 项端到端测试及四份原始素材 218 帧消息/图像、214 个检测/TF 对照通过。4.1～4.4 本轮字段、空帧、绘图及对照问答已通过；本人于 2026-11-03 确认 rqt、检测消息、RViz“三处正常”，第 4 点验收通过。README 精简后，本人明确要求“commit”，授权按已确认的 17 项文件范围本地提交，说明为 `Add detection messages and visualization checks.`，暂不 push；实际提交记录见 Git 历史。
 
 - **第 6 点：**第 4 点已本地提交为 `4db06c4`。本人核对依赖后明确选择先做第 6 点、再完整验收第 5 点。已集中实现 6.1～6.5：ft_msgs/Track、ft_tracker 核心与节点、跟踪 YAML/launch、单测/节点集成测试、统一启动和 RViz。95 项独立 C++ 用例、2 项节点端到端测试、四份素材 405 帧链路及真实 red_4 输出的受控漏检/回退检查通过。6.1～6.5 本轮问答通过；本人于 2026-11-03 按桌面步骤检查 rqt、Track 消息和 RViz 后反馈“正常”，第 6 点验收通过。本人随后明确要求“commit”，授权按已确认的 22 项文件范围本地提交，说明为 `Add single armor tracking and lead prediction.`，暂不 push；实际记录见 Git 历史。第 5 点动态调参尚未开始。
+
+- **第 5 点：**第 6 点已本地提交为 `31abdf0`。已集中实现 5.1～5.4：21 项在线参数、Detector.cfg、转换层、YAML 初值与实例默认值、组合校验/整组回退及测试。95 项独立 C++ 用例、3 项节点测试、四份素材 267 帧及同帧参数对照、YAML 重启和实际 rqt 控件检查通过。5.1～5.3 本轮问答通过；本人于 2026-11-03 反馈“实验效果符合预期，已恢复默认值”，5.4 手动实验及第 5 点验收通过。本人随后明确回复“确认”，授权按已确认的 17 项文件范围本地提交，说明为 `Add dynamic detector tuning and parameter validation.`，暂不 push；实际记录见 Git 历史。

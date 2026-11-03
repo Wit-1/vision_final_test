@@ -1,0 +1,14 @@
+<launch>
+  <param name="/use_sim_time" value="false" />
+  <include file="$(find ft_bringup)/launch/detector.launch" />
+  <rosparam command="load" ns="/ft_detector/tuning" file="$(find ft_bringup)/test/tuning_override.yaml" />
+  <!-- Test-only known endpoint geometry for synthetic images. -->
+  <param name="/ft_detector/pnp/small/confirmed" value="true" type="bool" />
+  <param name="/ft_detector/pnp/small/width_m" value="0.135" type="double" />
+  <param name="/ft_detector/pnp/small/height_m" value="0.056" type="double" />
+  <param name="/ft_detector/pnp/large/confirmed" value="true" type="bool" />
+  <param name="/ft_detector/pnp/large/width_m" value="0.230" type="double" />
+  <param name="/ft_detector/pnp/large/height_m" value="0.056" type="double" />
+  <param name="/ft_detector/pnp/allow_provisional_dimensions" value="false" type="bool" />
+  <test test-name="detector_tuning" pkg="ft_bringup" type="tuning_test.py" time-limit="60" />
+</launch>

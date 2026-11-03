@@ -107,7 +107,7 @@ PnpResult.continuity_selected 表示参考历史后选择了 RMS 略大的当前
 
 参数 pnp/continuity 包含 enabled、error_margin_px=1.0、max_gap_s=0.1、max_corner_shift_ratio=0.5。error_margin_px 是相对当帧最优误差允许增加的量，不能替代原来的绝对 3 px 门限。PnpParams 的算法默认 margin 为 0，节点明确从 YAML 加载。关闭 enabled 后不传入历史参考，恢复单帧最小误差选择；修改参数后重启。
 
-pnp.enabled 关闭全部三维求解；pnp.publish_tf 仅关闭 TF 广播，合格位姿仍可投影显示。全部几何尺寸、深度、面积、边长、重投影误差和轴长由 YAML 加载，修改后需重启。在线调参仍在第 5 点实现。
+pnp.enabled 关闭全部三维求解；pnp.publish_tf 仅关闭 TF 广播，合格位姿仍可投影显示。全部参数由 YAML 加载；tuning 中的 21 项可通过 dynamic_reconfigure 在线调整，其余参数修改后重启，加载及校验规则见下文。
 
 RViz 通过 demo.launch 的 rviz 参数按需启动。view_rviz.py 从检测节点参数读取同一个 CameraInfo 话题，收到首个非空 frame_id 后以该固定帧启动 RViz；帧名改变时先停止原查看器再启动新查看器，相同帧名不会重启。关闭 RViz 后启动器退出，关闭 launch 时清理子进程。监控使用墙上时间，暂停 bag 的模拟时间不会阻塞清理。
 
@@ -138,3 +138,26 @@ Q 来自连续白加速度模型，三个轴互相独立；每个轴的位置/�
 `/ft/debug/marker` 使用三个固定 namespace/id：绿色球（0）为当前估计，橙色球（1）为未来位置，橙线（2）连接两者；纯预测时降低透明度。轨迹删除时发送三个 DELETE，避免把旧 marker 当当前轨迹。marker 时间与坐标系和 Track 一致，生命周期由 YAML 配置；空 frame_id 时用上一个有效坐标系删除旧标记。RViz 的 Tracking 显示订阅该话题。
 
 跟踪处理的是相机坐标系中的相对平移。车体旋转换面、相机运动、大小误分类和暂定 PnP 尺寸都可能影响它；第 9 点再处理车体旋转与选板。滤波接口依据：[OpenCV 4.2 KalmanFilter](https://docs.opencv.org/4.2.0/dd/d6a/classcv_1_1KalmanFilter.html)。
+
+## 参数加载与在线调参
+
+| YAML 位置 / 参数命名空间 | 内容 | 生效方式 |
+|---|---|---|
+| detector.yaml 根 /ft_detector | 相机和输出话题、队列、transport、debug_details | 启动读取 |
+| detector.yaml tuning /ft_detector/tuning | 蓝色与两段红色共 18 项 HSV 边界、最小面积、最大配对间距/角度差 | 启动读取及 dynamic_reconfigure |
+| detector.yaml traditional /ft_detector/traditional | 灯条长度、长宽比、填充率、倾角、配对长度/高度差、最小间距、大小分界及歧义规则 | 启动读取 |
+| detector.yaml pnp /ft_detector/pnp | 大小板端点尺寸及确认标记、深度/重投影门限、历史消歧与 TF 参数 | 启动读取 |
+| tracker.yaml /ft_tracker | Q 的 q、R、初始协方差、关联/属性/丢失门限、T、话题/队列及 marker | 启动读取 |
+| datasets/*.yaml | bag 文件名；公共参数之后加载，同名键由数据集覆盖 | 启动/回放读取 |
+
+CameraInfo 继续提供 K、D、图像尺寸及实际 frame_id，不将内参写入 YAML。launch 通过 `$(find ft_bringup)` 找配置；run.sh 使用自身项目根定位。此前的 traditional/blue 等 HSV 路径统一迁移为 tuning/blue_h_min 等字段，最小面积和最大配对间距/角度差也迁入 tuning，其数值及算法判据保持原值。
+
+Detector.cfg 声明 21 项字段、类型、单值范围和构建默认值，并生成 DetectorConfig.h/Python 配置。H 范围 0～179，S/V 为 0～255；面积 0.1～10000 px²，最大归一化间距 0.1～20，最大角度差 0.1～90°。自动测试逐项核对构建默认值与公共 YAML 一致。启动时先严格读取和验证 YAML，再将实际参数转换为配置；超出 UI 范围的启动值报错退出，避免静默截断。
+
+节点在 `/ft_detector/tuning` 建立动态服务，先 updateConfig 写入实际 YAML 初值，setConfigDefault 更新本实例的默认描述，再注册回调。这样数据集/测试覆盖后的初值与 rqt 的当前值、恢复默认值一致，不被构建默认值或上次运行的参数服务器残留覆盖。服务器使用外部递归互斥锁。
+
+tuning_parameters.hpp/cpp 在算法参数与生成配置之间转换。paramsWithTuning 先复制现有 TraditionalParams，再改 21 项，因此未暴露的几何参数保留。ft_detector_tuning 是依赖生成配置的适配库，原 ft_detector_core 仍不依赖 ROS。CMake 显式依赖 gencfg，生成物保留在构建目录。
+
+当前节点用单线程 ros::spin，图像和配置回调依次执行。在线回调调用已有 setParams，先校验完整组合再替换；HSV 下限大于上限、最大配对间距不大于大小分界、NaN 等组合会恢复上一次完整有效配置，服务响应、参数服务器与 rqt 同步恢复。单值越界由动态服务先限制到 cfg 范围，组合合法性仍由算法校验。参数有效且确实改变时清空旧 PnP 参考；跟踪节点按实际检测结果处理空帧与关联。
+
+在线修改更新内存对象和参数服务器，不写 YAML。仅 rosparam set 或修改磁盘 YAML 不会自动重建算法；需调用动态服务/rqt，或改 YAML 后重启。恢复默认指本次启动加载的 YAML 值；要跨次运行保留调整，手动写回 YAML。该行为依据已安装 Noetic 实现及 [dynamic_reconfigure Server 源码](https://github.com/ros/dynamic_reconfigure/blob/noetic-devel/include/dynamic_reconfigure/server.h)。

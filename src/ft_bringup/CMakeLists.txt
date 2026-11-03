@@ -10,7 +10,8 @@ catkin_install_python(PROGRAMS scripts/view_rviz.py DESTINATION ${CATKIN_PACKAGE
 
 if(CATKIN_ENABLE_TESTING)
   find_package(rostest REQUIRED)
-  catkin_install_python(PROGRAMS test/pipeline_test.py test/tracker_test.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+  catkin_install_python(PROGRAMS test/pipeline_test.py test/tracker_test.py test/tuning_test.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
   add_rostest(test/pipeline.test)
   add_rostest(test/tracker.test)
+  add_rostest(test/tuning.test)
 endif()

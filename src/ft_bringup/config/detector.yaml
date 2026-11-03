@@ -16,14 +16,33 @@ blue_mask_topic: /ft/debug/mask/blue
 red_mask_topic: /ft/debug/mask/red
 debug_details: false
 
-traditional:
+# Online fields use the same names as Detector.cfg under /ft_detector/tuning.
+tuning:
   # OpenCV uint8 HSV: H 0..179, S/V 0..255. Red wraps around H=0.
-  blue: {h_min: 85, h_max: 135, s_min: 65, s_max: 255, v_min: 130, v_max: 255}
-  red_low: {h_min: 0, h_max: 35, s_min: 80, s_max: 255, v_min: 210, v_max: 255}
-  red_high: {h_min: 160, h_max: 179, s_min: 80, s_max: 255, v_min: 210, v_max: 255}
+  blue_h_min: 85
+  blue_h_max: 135
+  blue_s_min: 65
+  blue_s_max: 255
+  blue_v_min: 130
+  blue_v_max: 255
+  red_low_h_min: 0
+  red_low_h_max: 35
+  red_low_s_min: 80
+  red_low_s_max: 255
+  red_low_v_min: 210
+  red_low_v_max: 255
+  red_high_h_min: 160
+  red_high_h_max: 179
+  red_high_s_min: 80
+  red_high_s_max: 255
+  red_high_v_min: 210
+  red_high_v_max: 255
+  min_contour_area: 20.0          # px^2
+  max_pair_spacing_ratio: 5.8    # centre distance / mean light length
+  max_pair_angle_deg: 12.0
 
+traditional:
   # 2.2: single-light geometry. Area is px^2; length and border are pixels.
-  min_contour_area: 20.0
   min_light_length: 10.0
   min_light_aspect: 2.5
   max_light_aspect: 15.0
@@ -33,10 +52,8 @@ traditional:
 
   # 2.3/2.4: dimensionless geometry, normalized by mean light length.
   min_pair_length_ratio: 0.75
-  max_pair_angle_deg: 12.0
   max_pair_center_dy_ratio: 0.35
   min_pair_spacing_ratio: 1.4
-  max_pair_spacing_ratio: 5.8
   large_armor_min_spacing_ratio: 3.4
   intervening_light_max_offset_ratio: 0.5
   pair_ambiguity_margin: 0.1

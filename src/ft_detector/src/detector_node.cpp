@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <cv_bridge/cv_bridge.h>
+#include <dynamic_reconfigure/server.h>
 #include <image_transport/image_transport.h>
 #include <ros/ros.h>
 #include <sensor_msgs/CameraInfo.h>
@@ -22,6 +23,7 @@
 #include "ft_detector/pnp_solver.hpp"
 #include "ft_detector/pose_history.hpp"
 #include "ft_detector/traditional_detector.hpp"
+#include "ft_detector/tuning_parameters.hpp"
 
 class DetectorNode {
  public:
@@ -33,7 +35,8 @@ class DetectorNode {
     const auto red_mask_topic = requiredParam<std::string>("red_mask_topic");
     const auto detection_topic = requiredParam<std::string>("detection_topic");
     debug_details_ = requiredParam<bool>("debug_details");
-    detector_.reset(new ft_detector::TraditionalDetector(loadTraditionalParams()));
+    traditional_params_ = loadTraditionalParams();
+    detector_.reset(new ft_detector::TraditionalDetector(traditional_params_));
     pnp_enabled_ = requiredParam<bool>("pnp/enabled");
     publish_tf_ = requiredParam<bool>("pnp/publish_tf");
     child_frame_prefix_ = requiredParam<std::string>("pnp/child_frame_prefix");
@@ -62,10 +65,10 @@ class DetectorNode {
 
     if (image_topic.empty() || camera_info_topic.empty() || debug_image_topic.empty() || blue_mask_topic.empty() ||
         red_mask_topic.empty() || detection_topic.empty() || transport.empty()) {
-      throw std::invalid_argument("Image topics and transport must not be empty");
+      throw std::invalid_argument("Input/output topics and image transport must not be empty");
     }
     if (image_queue <= 0 || camera_info_queue <= 0 || debug_queue <= 0 || detection_queue <= 0) {
-      throw std::invalid_argument("Image, CameraInfo and debug queue sizes must be positive");
+      throw std::invalid_argument("Image, CameraInfo, debug and detection queue sizes must be positive");
     }
 
     debug_publisher_ = image_transport_.advertise(debug_image_topic, debug_queue);
@@ -78,6 +81,8 @@ class DetectorNode {
     image_subscriber_ = image_transport_.subscribe(
         image_topic, image_queue, &DetectorNode::imageCallback, this,
         image_transport::TransportHints(transport, ros::TransportHints(), private_nh_));
+
+    initializeTuning();
 
     ROS_INFO_STREAM("Image input: " << image_topic << " transport=" << transport
                                    << ", CameraInfo: " << camera_info_topic
@@ -97,25 +102,25 @@ class DetectorNode {
   ft_detector::TraditionalParams loadTraditionalParams() const {
     const auto hsv = [this](const std::string& name) {
       return ft_detector::HsvRange{
-          requiredParam<int>(name + "/h_min"), requiredParam<int>(name + "/h_max"),
-          requiredParam<int>(name + "/s_min"), requiredParam<int>(name + "/s_max"),
-          requiredParam<int>(name + "/v_min"), requiredParam<int>(name + "/v_max")};
+          requiredParam<int>("tuning/" + name + "_h_min"), requiredParam<int>("tuning/" + name + "_h_max"),
+          requiredParam<int>("tuning/" + name + "_s_min"), requiredParam<int>("tuning/" + name + "_s_max"),
+          requiredParam<int>("tuning/" + name + "_v_min"), requiredParam<int>("tuning/" + name + "_v_max")};
     };
     ft_detector::TraditionalParams params;
-    params.blue = hsv("traditional/blue");
-    params.red_low = hsv("traditional/red_low");
-    params.red_high = hsv("traditional/red_high");
-    params.min_contour_area = requiredParam<double>("traditional/min_contour_area");
+    params.blue = hsv("blue");
+    params.red_low = hsv("red_low");
+    params.red_high = hsv("red_high");
+    params.min_contour_area = requiredParam<double>("tuning/min_contour_area");
     params.min_light_length = requiredParam<double>("traditional/min_light_length");
     params.min_light_aspect = requiredParam<double>("traditional/min_light_aspect");
     params.max_light_aspect = requiredParam<double>("traditional/max_light_aspect");
     params.min_light_fill = requiredParam<double>("traditional/min_light_fill");
     params.max_light_tilt_deg = requiredParam<double>("traditional/max_light_tilt_deg");
     params.min_pair_length_ratio = requiredParam<double>("traditional/min_pair_length_ratio");
-    params.max_pair_angle_deg = requiredParam<double>("traditional/max_pair_angle_deg");
+    params.max_pair_angle_deg = requiredParam<double>("tuning/max_pair_angle_deg");
     params.max_pair_center_dy_ratio = requiredParam<double>("traditional/max_pair_center_dy_ratio");
     params.min_pair_spacing_ratio = requiredParam<double>("traditional/min_pair_spacing_ratio");
-    params.max_pair_spacing_ratio = requiredParam<double>("traditional/max_pair_spacing_ratio");
+    params.max_pair_spacing_ratio = requiredParam<double>("tuning/max_pair_spacing_ratio");
     params.large_armor_min_spacing_ratio = requiredParam<double>("traditional/large_armor_min_spacing_ratio");
     params.intervening_light_max_offset_ratio = requiredParam<double>("traditional/intervening_light_max_offset_ratio");
     params.pair_ambiguity_margin = requiredParam<double>("traditional/pair_ambiguity_margin");
@@ -140,6 +145,37 @@ class DetectorNode {
     params.min_edge_length_px = requiredParam<double>("pnp/min_edge_length_px");
     params.axis_length_m = requiredParam<double>("pnp/axis_length_m");
     return params;
+  }
+
+  void initializeTuning() {
+    active_tuning_ = ft_detector::tuningFromParams(traditional_params_);
+    auto clamped = active_tuning_;
+    clamped.__clamp__();
+    if (active_tuning_.__level__(clamped) != 0)
+      throw std::invalid_argument("YAML tuning value is outside the Detector.cfg UI range");
+
+    const ros::NodeHandle tuning_nh(private_nh_, "tuning");
+    tuning_server_.reset(new TuningServer(tuning_mutex_, tuning_nh));
+    // Seed before setCallback: its initial call must use the loaded YAML, including dataset overrides.
+    tuning_server_->updateConfig(active_tuning_);
+    tuning_server_->setConfigDefault(active_tuning_);
+    tuning_server_->setCallback([this](ft_detector::DetectorConfig& config, std::uint32_t) {
+      try {
+        const auto next = ft_detector::paramsWithTuning(traditional_params_, config);
+        const bool changed = active_tuning_.__level__(config) != 0;
+        detector_->setParams(next);  // Validates the complete combination before changing the algorithm.
+        traditional_params_ = next;
+        active_tuning_ = config;
+        if (changed) {
+          pose_history_->reset();
+          ROS_INFO("Detector tuning applied; previous PnP references cleared");
+        }
+      } catch (const std::invalid_argument& error) {
+        config = active_tuning_;  // The server publishes and stores this valid configuration back to the client.
+        ROS_WARN_STREAM("Detector tuning rejected; previous configuration retained: " << error.what());
+      }
+    });
+    ROS_INFO_STREAM("Dynamic detector tuning: " << tuning_nh.getNamespace());
   }
 
   void cameraInfoCallback(const sensor_msgs::CameraInfoConstPtr& message) {
@@ -273,6 +309,11 @@ class DetectorNode {
   image_transport::Publisher blue_mask_publisher_, red_mask_publisher_;
   ros::Publisher detection_publisher_;
   std::unique_ptr<ft_detector::TraditionalDetector> detector_;
+  ft_detector::TraditionalParams traditional_params_;
+  using TuningServer = dynamic_reconfigure::Server<ft_detector::DetectorConfig>;
+  ft_detector::DetectorConfig active_tuning_;
+  boost::recursive_mutex tuning_mutex_;
+  std::unique_ptr<TuningServer> tuning_server_;
   std::unique_ptr<ft_detector::PnpSolver> pnp_solver_;
   std::unique_ptr<ft_detector::PoseHistory> pose_history_;
   ft_detector::CameraCalibration calibration_;
