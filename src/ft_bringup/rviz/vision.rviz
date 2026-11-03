@@ -18,7 +18,6 @@ Visualization Manager:
         All Enabled: true
   Global Options:
     Background Color: 32; 32; 32
-    Fixed Frame: camera_optical_frame
     Frame Rate: 30
   Tools:
     - Class: rviz/Interact

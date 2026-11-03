@@ -1,3 +1,1 @@
 bag_file: blue_1.bag
-image_topic: /hk_camera/image_raw
-camera_info_topic: /hk_camera/camera_info

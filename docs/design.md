@@ -42,7 +42,9 @@ allow_provisional_dimensions 默认在算法参数中为 false；当该开关关
 
 当前支持 plumb_bob（D 为空或 4/5 个系数）、rational_polynomial（8 个系数）；未知模型、非有限数据、无效焦距或 K 结构均拒绝。非平凡 ROI 和 binning>1 的坐标换算尚未实现，因此明确拒绝这类标定。无效 CameraInfo 清空缓存，不能继续用先前标定做三维解算；二维识别仍运行。
 
-四份原始素材当前均为 1440×1080、plumb_bob、5 个 D 系数，无 ROI 或 binning 换算。CameraInfo 将 frame_id 定义为相机光学坐标系；red_4 的名字 hk_camera_ca 不含 optical 字样，但不据名称擅自改轴或重命名。
+四份原始素材当前均为 1440×1080、plumb_bob、5 个 D 系数，无 ROI 或 binning 换算。它们共用 `/hk_camera/image_raw/compressed` 和 `/hk_camera/camera_info`，公共入口定义在 detector.yaml，各数据集 YAML 仅保存 bag 文件名。detector.launch 和 run.sh play 均先读公共参数再应用数据集覆盖。
+
+话题名称与消息 header.frame_id 独立。CameraInfo 将 frame_id 定义为相机光学坐标系，节点始终保留实际消息中的名称，不据话题名推断坐标轴或重命名。
 
 ## 位姿求解与筛选
 
@@ -88,7 +90,9 @@ PnpResult.continuity_selected 表示参考历史后选择了 RMS 略大的当前
 
 pnp.enabled 关闭全部三维求解；pnp.publish_tf 仅关闭 TF 广播，合格位姿仍可投影显示。全部几何尺寸、深度、面积、边长、重投影误差和轴长由 YAML 加载，修改后需重启。在线调参仍在第 5 点实现。
 
-RViz 通过 demo.launch 的 rviz 参数按需启动，rviz_fixed_frame 仅配置查看器，不改变实际 TF 父坐标系。前三份素材使用 camera_optical_frame，red_4 使用 hk_camera_ca；其他输入须依据实际 CameraInfo 设置查看器。
+RViz 通过 demo.launch 的 rviz 参数按需启动。view_rviz.py 从检测节点参数读取同一个 CameraInfo 话题，收到首个非空 frame_id 后以该固定帧启动 RViz；帧名改变时先停止原查看器再启动新查看器，相同帧名不会重启。关闭 RViz 后启动器退出，关闭 launch 时清理子进程。监控使用墙上时间，暂停 bag 的模拟时间不会阻塞清理。
+
+脚本不包含任何数据集名称分支，也不改写 CameraInfo、图像或 TF。固定帧不再通过额外的 launch 参数或 RViz 配置中的常量指定；真实相机坐标系由消息决定。
 
 ## 接口依据
 

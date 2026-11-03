@@ -11,7 +11,7 @@ usage() {
   ./run.sh check
   ./run.sh build [软件包名或 catkin build 参数]
   ./run.sh test
-  ./run.sh launch [dataset:=blue_1] [gui:=true] [rviz:=false] [rviz_fixed_frame:=camera_optical_frame]
+  ./run.sh launch [dataset:=blue_1] [gui:=true] [rviz:=false]
   ./run.sh play <blue_1|blue_guard|red_1_3|red_4> [rosbag play 参数]
 
 示例（两个终端使用同一数据集）：
@@ -52,7 +52,7 @@ case "$command_name" in
 import cv2
 import rospkg
 
-packages = ["roscpp", "sensor_msgs", "cv_bridge", "image_transport",
+packages = ["roscpp", "rospy", "sensor_msgs", "cv_bridge", "image_transport",
             "compressed_image_transport", "message_generation", "message_runtime",
             "rosbag", "roslaunch", "rqt_image_view", "tf2", "tf2_ros", "rviz"]
 rospack = rospkg.RosPack()
@@ -104,7 +104,9 @@ root = Path(sys.argv[1])
 profile = root / "src/ft_bringup/config/datasets" / (sys.argv[2] + ".yaml")
 if not profile.is_file():
     raise SystemExit("未知数据集：" + sys.argv[2])
-config = yaml.safe_load(profile.read_text())
+# Match detector.launch: common settings first, then dataset overrides.
+config = yaml.safe_load((root / "src/ft_bringup/config/detector.yaml").read_text())
+config.update(yaml.safe_load(profile.read_text()))
 bag = root / "task" / config["bag_file"]
 if not bag.is_file():
     raise SystemExit("找不到素材：" + str(bag))

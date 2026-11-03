@@ -16,7 +16,7 @@
 
 `run.sh` 会清理旧工作空间的搜索路径，从 `/opt/ros/noetic` 加载基础环境，再加载本项目的构建结果。构建输出保存在本项目内。首次在嵌套目录构建时，脚本会建立明确的工作空间标记，避免 catkin 向上找到父工作空间。
 
-主要依赖为 catkin tools、roscpp、sensor_msgs、cv_bridge、image_transport、compressed_image_transport、OpenCV 4.x、roslaunch、rosbag、rqt_image_view、tf2、tf2_ros、RViz 和 Python YAML。几何测试另需 gtest。项目已在 OpenCV 4.2.0 上验证；原生或容器化的 Noetic 环境均需提供这些依赖。
+主要依赖为 catkin tools、roscpp、rospy、sensor_msgs、cv_bridge、image_transport、compressed_image_transport、OpenCV 4.x、roslaunch、rosbag、rqt_image_view、tf2、tf2_ros、RViz 和 Python YAML。几何测试另需 gtest。项目已在 OpenCV 4.2.0 上验证；原生或容器化的 Noetic 环境均需提供这些依赖。
 
 ## 两个终端运行
 
@@ -44,19 +44,21 @@
 
 数据集名称与素材对应：
 
-| 数据集参数 | 本地素材 | 相机话题前缀 |
-|---|---|---|
-| `blue_1` | `task/blue_1.bag` | `/hk_camera/` |
-| `blue_guard` | `task/blue_guard.bag` | `/hk_camera/` |
-| `red_1_3` | `task/red_1&3.bag` | `/hk_camera/` |
-| `red_4` | `task/red_4.bag` | `/hk_camera_ca/` |
+| 数据集参数 | 本地素材 |
+|---|---|
+| `blue_1` | `task/blue_1.bag` |
+| `blue_guard` | `task/blue_guard.bag` |
+| `red_1_3` | `task/red_1&3.bag` |
+| `red_4` | `task/red_4.bag` |
+
+四份原始素材共用 `/hk_camera/image_raw/compressed` 和 `/hk_camera/camera_info`。公共配置保存在 `detector.yaml`，数据集文件只保存 bag 文件名；检测启动和回放均按“公共参数→数据集覆盖”的相同顺序加载。
 
 切换数据集时，停止旧回放和启动进程，再在两个终端使用新的数据集名称。图像接入代码保持不变。
 
 ## 参数与数据流
 
 - [detector.yaml](src/ft_bringup/config/detector.yaml)：公共话题、压缩 transport、三个队列长度，以及第 2 点所有 HSV 和几何参数；队列默认均为 1。
-- [datasets](src/ft_bringup/config/datasets)：每份素材的 bag 文件名、图像基础话题和 CameraInfo 话题。
+- [datasets](src/ft_bringup/config/datasets)：每份素材的 bag 文件名，共用话题从公共 YAML 读取。
 - [demo.launch](src/ft_bringup/launch/demo.launch)：设置 `/use_sim_time`，启动检测节点，并按 `gui` 参数启动 rqt。
 - [detector.launch](src/ft_bringup/launch/detector.launch)：先加载公共 YAML，再加载数据集 YAML，后者覆盖相同键。
 
@@ -130,12 +132,12 @@ pnp:
 启用 RViz 的方式：
 
 ```bash
-./run.sh launch dataset:=blue_1 rviz:=true
-# red_4 的光学坐标系名字不同，需要同步设置查看器：
-./run.sh launch dataset:=red_4 rviz:=true rviz_fixed_frame:=hk_camera_ca
+./run.sh launch dataset:=red_4 rviz:=true
 ```
 
-以上是两种独立启动示例，先停止上一组程序再切换。`gui:=false rviz:=true` 可只打开 RViz。rviz_fixed_frame 仅改变查看器，不改变节点读取的标定或 TF 父坐标系；不允许临时尺寸且尺寸未确认时，没有 armor TF 是预期行为。
+四份素材使用相同的启动方式。`gui:=false rviz:=true` 可只打开 RViz。查看器在收到第一份非空 `CameraInfo.header.frame_id` 后打开，固定坐标系自动使用该值；回放初始暂停时，按空格开始后才会打开 RViz。坐标系名称改变时自动重启查看器，重复的相同名称不会重启。
+
+话题名与 `header.frame_id` 是独立字段。检测节点和查看器都读取消息实际坐标系，不根据话题名推断或改写；无需为某份素材传入额外的固定帧参数。不允许临时尺寸且尺寸未确认时，没有 armor TF 是预期行为。
 
 合成测试验证软件实现和显示，不代替原始素材的实际尺寸与距离验收。实验脚本、截图和中间日志已清理；正式测试保留在 `src/ft_detector/test/`。
 
@@ -153,7 +155,7 @@ roslaunch ft_bringup demo.launch dataset:=red_4
 
 ```bash
 rosbag play --clock task/red_4.bag \
-  --topics /hk_camera_ca/image_raw/compressed /hk_camera_ca/camera_info \
+  --topics /hk_camera/image_raw/compressed /hk_camera/camera_info \
   --pause -r 0.2
 ```
 
