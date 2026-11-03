@@ -8,21 +8,17 @@
 #include <string>
 #include <vector>
 
-#include <opencv2/calib3d.hpp>
-
 #include <cv_bridge/cv_bridge.h>
-#include <geometry_msgs/TransformStamped.h>
 #include <image_transport/image_transport.h>
 #include <ros/ros.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
 #include <std_msgs/Header.h>
-#include <tf2/LinearMath/Matrix3x3.h>
-#include <tf2/LinearMath/Quaternion.h>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include "ft_detector/debug_draw.hpp"
+#include "ft_detector/detection_output.hpp"
 #include "ft_detector/pnp_solver.hpp"
 #include "ft_detector/pose_history.hpp"
 #include "ft_detector/traditional_detector.hpp"
@@ -35,6 +31,7 @@ class DetectorNode {
     const auto debug_image_topic = requiredParam<std::string>("debug_image_topic");
     const auto blue_mask_topic = requiredParam<std::string>("blue_mask_topic");
     const auto red_mask_topic = requiredParam<std::string>("red_mask_topic");
+    const auto detection_topic = requiredParam<std::string>("detection_topic");
     debug_details_ = requiredParam<bool>("debug_details");
     detector_.reset(new ft_detector::TraditionalDetector(loadTraditionalParams()));
     pnp_enabled_ = requiredParam<bool>("pnp/enabled");
@@ -61,18 +58,20 @@ class DetectorNode {
     const int image_queue = requiredParam<int>("image_queue_size");
     const int camera_info_queue = requiredParam<int>("camera_info_queue_size");
     const int debug_queue = requiredParam<int>("debug_queue_size");
+    const int detection_queue = requiredParam<int>("detection_queue_size");
 
     if (image_topic.empty() || camera_info_topic.empty() || debug_image_topic.empty() || blue_mask_topic.empty() ||
-        red_mask_topic.empty() || transport.empty()) {
+        red_mask_topic.empty() || detection_topic.empty() || transport.empty()) {
       throw std::invalid_argument("Image topics and transport must not be empty");
     }
-    if (image_queue <= 0 || camera_info_queue <= 0 || debug_queue <= 0) {
+    if (image_queue <= 0 || camera_info_queue <= 0 || debug_queue <= 0 || detection_queue <= 0) {
       throw std::invalid_argument("Image, CameraInfo and debug queue sizes must be positive");
     }
 
     debug_publisher_ = image_transport_.advertise(debug_image_topic, debug_queue);
     blue_mask_publisher_ = image_transport_.advertise(blue_mask_topic, debug_queue);
     red_mask_publisher_ = image_transport_.advertise(red_mask_topic, debug_queue);
+    detection_publisher_ = nh_.advertise<ft_detection::DetectionFrame>(detection_topic, detection_queue);
     camera_info_subscriber_ = nh_.subscribe(camera_info_topic, camera_info_queue,
                                            &DetectorNode::cameraInfoCallback, this);
     // compressed 插件先解码，imageCallback 接收到的是 sensor_msgs::Image。
@@ -82,7 +81,7 @@ class DetectorNode {
 
     ROS_INFO_STREAM("Image input: " << image_topic << " transport=" << transport
                                    << ", CameraInfo: " << camera_info_topic
-                                   << ", debug: " << debug_image_topic);
+                                   << ", debug: " << debug_image_topic << ", detections: " << detection_topic);
   }
 
  private:
@@ -189,40 +188,6 @@ class DetectorNode {
     }
   }
 
-  void publishTransforms(const std::vector<ft_detector::PnpResult>& poses,
-                         const std_msgs::Header& image_header) {
-    std::vector<geometry_msgs::TransformStamped> transforms;
-    for (const auto& result : poses) {
-      if (!result.valid) continue;
-      const auto& pose = result.pose;
-      cv::Matx33d rotation;
-      cv::Rodrigues(pose.rvec, rotation);
-      const tf2::Matrix3x3 basis(rotation(0, 0), rotation(0, 1), rotation(0, 2),
-                                 rotation(1, 0), rotation(1, 1), rotation(1, 2),
-                                 rotation(2, 0), rotation(2, 1), rotation(2, 2));
-      tf2::Quaternion quaternion;
-      basis.getRotation(quaternion);
-      quaternion.normalize();
-      geometry_msgs::TransformStamped transform;
-      transform.header = image_header;
-      transform.header.frame_id = camera_info_->header.frame_id;
-      transform.child_frame_id = child_frame_prefix_ + std::to_string(pose.id);
-      if (transform.child_frame_id == transform.header.frame_id) {
-        ROS_ERROR_THROTTLE(1.0, "Armor child frame must differ from camera parent frame");
-        continue;
-      }
-      transform.transform.translation.x = pose.tvec[0];
-      transform.transform.translation.y = pose.tvec[1];
-      transform.transform.translation.z = pose.tvec[2];
-      transform.transform.rotation.x = quaternion.x();
-      transform.transform.rotation.y = quaternion.y();
-      transform.transform.rotation.z = quaternion.z();
-      transform.transform.rotation.w = quaternion.w();
-      transforms.push_back(transform);
-    }
-    if (!transforms.empty()) tf_broadcaster_.sendTransform(transforms);
-  }
-
   void imageCallback(const sensor_msgs::ImageConstPtr& message) {
     try {
       // 编码相同时共享解码后的像素；压缩解码和发布输出仍有各自的数据分配。
@@ -242,7 +207,11 @@ class DetectorNode {
       }
 
       const auto result = detector_->detect(shared_image->image);
-      std::vector<ft_detector::PnpResult> poses;
+      std::vector<ft_detector::PnpResult> poses(result.armors.size());
+      for (std::size_t i = 0; i < result.armors.size(); ++i) {
+        poses[i].pose.id = result.armors[i].id;
+        poses[i].reason = pnp_enabled_ ? "awaiting_camera_info" : "disabled";
+      }
       std::string pnp_status = "disabled";
       if (pnp_enabled_) {
         pnp_status = "awaiting_camera_info";
@@ -251,7 +220,7 @@ class DetectorNode {
           if (pose_continuity_enabled_)
             references = pose_history_->references(result.armors, message->header.stamp.toSec());
           for (std::size_t i = 0; i < result.armors.size(); ++i)
-            poses.push_back(pnp_solver_->solve(result.armors[i], calibration_, references[i]));
+            poses[i] = pnp_solver_->solve(result.armors[i], calibration_, references[i]);
           // 求完整帧后再更新历史，避免前面返回的参考指针提前失效。
           if (pose_continuity_enabled_)
             pose_history_->store(result.armors, poses, message->header.stamp.toSec());
@@ -261,10 +230,12 @@ class DetectorNode {
                 [](const ft_detector::PnpResult& pose) { return pose.valid && pose.provisional; });
             pnp_status = provisional ? "provisional" : "ready";
           }
-          if (publish_tf_) publishTransforms(poses, message->header);
         }
       }
       if (!pnp_enabled_ || !pose_continuity_enabled_) pose_history_->reset();
+      const auto output = ft_detector::buildDetectionOutput(message->header, result.armors, poses, child_frame_prefix_);
+      detection_publisher_.publish(output.frame);  // 包括 detections 为空的成功处理帧。
+      if (publish_tf_ && !output.transforms.empty()) tf_broadcaster_.sendTransform(output.transforms);
       auto annotated = ft_detector::drawDetections(shared_image->image, result, debug_details_);
       ft_detector::drawPoses(annotated, poses, pnp_status, debug_details_);
       debug_publisher_.publish(cv_bridge::CvImage(
@@ -279,6 +250,7 @@ class DetectorNode {
                                                      << " lights=" << result.lights.size()
                                                      << " armors=" << result.armors.size()
                                                      << " pnp=" << pnp_status
+                                                     << " published=" << output.frame.detections.size()
                                                      << " frame=" << message->header.frame_id
                                                      << " calibration="
                                                      << (calibration_ready ? "ready" : "unavailable"));
@@ -288,6 +260,9 @@ class DetectorNode {
     } catch (const cv::Exception& error) {
       pose_history_->reset();
       ROS_ERROR_STREAM("OpenCV image processing failed: " << error.what());
+    } catch (const std::exception& error) {
+      pose_history_->reset();
+      ROS_ERROR_STREAM("Detection output failed: " << error.what());
     }
   }
 
@@ -296,6 +271,7 @@ class DetectorNode {
   image_transport::ImageTransport image_transport_;
   image_transport::Publisher debug_publisher_;
   image_transport::Publisher blue_mask_publisher_, red_mask_publisher_;
+  ros::Publisher detection_publisher_;
   std::unique_ptr<ft_detector::TraditionalDetector> detector_;
   std::unique_ptr<ft_detector::PnpSolver> pnp_solver_;
   std::unique_ptr<ft_detector::PoseHistory> pose_history_;

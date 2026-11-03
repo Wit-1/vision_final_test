@@ -36,9 +36,12 @@ cv::Mat drawDetections(const cv::Mat& bgr, const DetectionResult& result, bool d
   }
   for (const auto& armor : result.armors) {
     const cv::Scalar color = armor.is_red ? cv::Scalar(0, 80, 255) : cv::Scalar(255, 180, 0);
+    const cv::Point2f offsets[] = {{-10, -3}, {4, -3}, {4, 13}, {-10, 13}};
     for (std::size_t i = 0; i < armor.corners.size(); ++i) {
       cv::line(debug, armor.corners[i], armor.corners[(i + 1) % 4], color, 2, cv::LINE_AA);
       cv::circle(debug, armor.corners[i], 3, cv::Scalar(0, 255, 0), -1);
+      cv::putText(debug, std::to_string(i), armor.corners[i] + offsets[i],
+                  cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(230, 230, 230), 1, cv::LINE_AA);
     }
     const std::string label = "ID " + std::to_string(armor.id) +
                               (armor.is_red ? " RED " : " BLUE ") +

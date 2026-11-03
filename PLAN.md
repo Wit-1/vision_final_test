@@ -65,6 +65,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   │   │   ├── traditional_detector.hpp
 │   │   │   ├── pnp_solver.hpp
 │   │   │   ├── pose_history.hpp       # 上一帧位姿参考和唯一几何匹配
+│   │   │   ├── detection_output.hpp   # ROS 检测消息和 TF 的共同输出接口
 │   │   │   ├── debug_draw.hpp
 │   │   │   └── nn_detector.hpp
 │   │   ├── src/
@@ -72,6 +73,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   │   │   ├── traditional_detector.cpp
 │   │   │   ├── pnp_solver.cpp
 │   │   │   ├── pose_history.cpp       # 双解消歧所用历史的匹配与失效清理
+│   │   │   ├── detection_output.cpp   # 字段检查、共享四元数与消息构造
 │   │   │   ├── debug_draw.cpp
 │   │   │   └── nn_detector.cpp
 │   │   ├── cfg/
@@ -80,6 +82,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   │       ├── detector_geometry_test.cpp
 │   │       ├── pnp_solver_test.cpp
 │   │       ├── pose_history_test.cpp
+│   │       ├── detection_output_test.cpp
 │   │       └── nn_decode_test.cpp
 │   │
 │   ├── ft_tracker/                    # 单装甲板匀速跟踪
@@ -248,4 +251,6 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 
 - **第 3 点：**按本人要求一次性搭建 3.1～3.4 所需文件，再按顺序学习。PnP、端点与坐标约定、投影轴、TF、测试及 RViz 配置已接入；保留定义一和临时尺寸标记，当前小板 135×56 mm、大板 230×56 mm 的尺寸取自 Alliance2026 开源项目（据本人提供），暂用于本素材。原版 3.2～3.4 问答通过；本人反馈末尾静止段仍跳后，已依明确要求加入近误差候选的跨帧选解及唯一几何匹配、历史清理。59 项算法测试、11 项实际节点检查、四份 bag 接口回归及 red_4 末尾 TF 连续性检查通过。新增代码理解确认和修改后的桌面验收待本人反馈，真实米制准确性仍待复核；证据见验收记录；已按本人确认本地提交为 `fd87594`，尚未 push。
 
-- **2026-11-03 素材统一：**新版 red_4 的相机话题已统一，但实际 header 帧名仍不同。已集中公共相机入口、简化四份数据集 YAML，并用通用 CameraInfo 驱动的 RViz 启动器替代手动固定帧。四份原始素材回归、8 项查看器行为及 59 项算法测试通过；本次变更等待本人确认后 commit，不自动 push。
+- **2026-11-03 素材统一：**新版 red_4 的相机话题已统一，但实际 header 帧名仍不同。已集中公共相机入口、简化四份数据集 YAML，并用通用 CameraInfo 驱动的 RViz 启动器替代手动固定帧。四份原始素材回归、8 项查看器行为及 59 项算法测试通过；本次变更已按本人确认本地提交为 `6401c18`，未 push。
+
+- **第 4 点：**按本人“commit 后整理第四点任务文件”的要求集中搭建 4.1～4.4。新增共享消息/TF 输出适配层、12 项字段单测和两份管线集成测试文件，补齐节点发布、空帧和角点编号。71 项 C++ 单元用例、1 项端到端测试及四份原始素材 218 帧消息/图像、214 个检测/TF 对照通过。4.1～4.4 本轮字段、空帧、绘图及对照问答已通过；本人于 2026-11-03 确认 rqt、检测消息、RViz“三处正常”，第 4 点验收通过。README 精简后，本人明确要求“commit”，授权按已确认的 17 项文件范围本地提交，说明为 `Add detection messages and visualization checks.`，暂不 push；实际提交记录见 Git 历史。

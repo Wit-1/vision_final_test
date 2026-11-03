@@ -11,11 +11,30 @@
   → PoseHistory.references：上一帧中唯一匹配的位姿参考
   → PnpSolver：几何校验、平面候选、带条件的跨帧消歧与重投影
   → PoseHistory.store：整帧求解结束后保存本帧合格目标
-  → drawDetections / drawPoses：独立副本上的框、标记和坐标轴
-  → /ft/debug/image、两个 mask；合格位姿 → /tf
+  → buildDetectionOutput：单次姿态转换 → /ft/detection 与匹配的 /tf
+  → drawDetections / drawPoses：独立副本上的框、四点编号和坐标轴
+  → /ft/debug/image、两个 mask
 ```
 
-检测、PnP 和绘图位于无 ROS 依赖的 ft_detector_core。节点负责 ROS 接口和 TF。第 4 点将增加检测消息；目前没有把默认或无效位姿发布成检测结果。
+检测、PnP、历史和绘图位于无 ROS 依赖的 ft_detector_core。ft_detector_output 是独立 ROS 适配库，负责生成 DetectionFrame 与 TransformStamped，节点负责发布。每个二维候选对应一个 PnpResult；未求解时保持 valid=false，不以默认零位姿填充检测消息。
+
+## 检测消息协议
+
+沿用素材 ft_detection 包，不修改消息定义或 MD5。DetectionFrame 只有一份 header 和一个 detections 数组，Detection 元素本身没有 header。
+
+| 字段 | 当前含义 |
+|---|---|
+| header.stamp / frame_id | 输入图像时间和坐标系；有效位姿需图像与 CameraInfo 匹配 |
+| detections[].id | 当前帧唯一候选编号，过滤后可不连续，不代表跨帧身份 |
+| is_red / is_large_armor | 当前候选的颜色与大小分类 |
+| pose.position | 该装甲板原点在相机系的位置，直接使用 tvec，单位米 |
+| pose.orientation | rvec→旋转矩阵→归一化四元数，直接表示装甲板到相机的旋转 |
+| corners[4] | 原图像像素的 TL/TR/BR/BL；Point32 的 z 固定为 0 |
+| confidence | 当前传统几何评分 1/(1+cost)，不是概率，也不是参考 bag 中的占位 1.0 |
+
+buildDetectionOutput 检查数组对应、有效标志、候选/位姿 ID、重复 ID、有限值和评分范围；不合格候选不进入消息及其 TF。消息和 TF 共用同一个 geometry_msgs/Pose，不分别计算四元数。Point32 的二维像素不能按位置米制字段解释。三维尺寸仍是暂定来源，消息没有另加尺寸确认字段。
+
+每张成功解码并处理的图像发布一份 DetectionFrame，无目标或所有位姿失败时 detections 为空。缺少匹配标定、PnP 关闭也发布空帧，供后续跟踪按图像时间推进丢失状态；空帧不重复发送旧位姿或旧 TF。积压输入或损坏图像被跳过时不伪造处理结果。可用位姿的 TF 发布仍由 pnp.publish_tf 独立控制。
 
 ## 像素点、物体点和单位
 

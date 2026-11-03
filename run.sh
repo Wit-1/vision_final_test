@@ -54,7 +54,7 @@ import rospkg
 
 packages = ["roscpp", "rospy", "sensor_msgs", "cv_bridge", "image_transport",
             "compressed_image_transport", "message_generation", "message_runtime",
-            "rosbag", "roslaunch", "rqt_image_view", "tf2", "tf2_ros", "rviz"]
+            "rosbag", "roslaunch", "rqt_image_view", "tf2", "tf2_ros", "rviz", "rostest"]
 rospack = rospkg.RosPack()
 for name in packages:
     rospack.get_path(name)
@@ -82,9 +82,9 @@ PY
         ;;
     test)
         load_workspace
-        catkin build --workspace "$project_root" ft_detector --no-deps --no-status \
+        catkin build --workspace "$project_root" ft_detector ft_bringup --no-deps --no-status \
             --catkin-make-args run_tests
-        exec catkin_test_results "$project_root/build/ft_detector/test_results"
+        exec catkin_test_results "$project_root/build"
         ;;
     launch)
         load_workspace
