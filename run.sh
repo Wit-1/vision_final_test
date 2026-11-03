@@ -11,7 +11,7 @@ usage() {
   ./run.sh check
   ./run.sh build [软件包名或 catkin build 参数]
   ./run.sh test
-  ./run.sh launch [dataset:=blue_1] [gui:=true] [rviz:=false]
+  ./run.sh launch [dataset:=blue_1] [gui:=true] [rviz:=false] [tracker:=true]
   ./run.sh play <blue_1|blue_guard|red_1_3|red_4> [rosbag play 参数]
 
 示例（两个终端使用同一数据集）：
@@ -54,7 +54,7 @@ import rospkg
 
 packages = ["roscpp", "rospy", "sensor_msgs", "cv_bridge", "image_transport",
             "compressed_image_transport", "message_generation", "message_runtime",
-            "rosbag", "roslaunch", "rqt_image_view", "tf2", "tf2_ros", "rviz", "rostest"]
+            "rosbag", "roslaunch", "rqt_image_view", "tf2", "tf2_ros", "rviz", "rostest", "visualization_msgs"]
 rospack = rospkg.RosPack()
 for name in packages:
     rospack.get_path(name)
@@ -82,7 +82,7 @@ PY
         ;;
     test)
         load_workspace
-        catkin build --workspace "$project_root" ft_detector ft_bringup --no-deps --no-status \
+        catkin build --workspace "$project_root" ft_detector ft_tracker ft_bringup --no-deps --no-status \
             --catkin-make-args run_tests
         exec catkin_test_results "$project_root/build"
         ;;

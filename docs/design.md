@@ -118,3 +118,23 @@ RViz 通过 demo.launch 的 rviz 参数按需启动。view_rviz.py 从检测节�
 - [OpenCV 4.2 标定、PnP 与投影接口](https://docs.opencv.org/4.2.0/d9/d0c/group__calib3d.html)。
 - [ROS CameraInfo 定义](https://github.com/ros/common_msgs/blob/noetic-devel/sensor_msgs/msg/CameraInfo.msg)。
 - [ROS REP-103 单位与坐标约定](https://github.com/ros-infrastructure/rep/blob/master/rep-0103.rst)。
+
+## 单装甲板平移跟踪
+
+`ft_tracker_core` 不依赖 ROS，使用 OpenCV `cv::KalmanFilter` 的双精度六维匀速模型。ROS 节点只负责读取 YAML、转换观测、处理坐标系变化及发布 Track/Marker。输入是自写检测链路的 `/ft/detection`，不使用参考 bag 的检测或历史目标 TF。
+
+状态为 `[x,y,z,vx,vy,vz]`，位置单位米、速度单位 m/s，观测为装甲板中心 `[x,y,z]`。每一帧先预测位置 `p_pre=p_post+v*dt`，再用关联到的当前观测校正；`dt` 只取相邻输入图像时间差。H 取状态的前三维，F 的位置/速度交叉块为 `dt*I`。
+
+Q 来自连续白加速度模型，三个轴互相独立；每个轴的位置/速度块为 `q*[[dt^3/3,dt^2/2],[dt^2/2,dt]]`，因此 Q 会随真实 dt 改变。`process_noise_density` 是 q，单位 m²/s³；R 为 `measurement_noise_variance*I`，单位 m²。初始位置与速度方差分别由 YAML 配置，首帧速度为零，不凭一帧推断速度。
+
+当前试验初值 q=2、R=0.0025（位置标准差 5 cm）、初始位置方差 0.01、速度方差 4。它们是可调起点，未用距离真值标定；增大 q 允许速度更快变化，增大 R 降低对位置观测的信任。关联门限 0.5 m 取题面建议 0.3～0.5 m 的较宽端，避免初始速度未收敛时立即丢锁；它不是实测最优值，后续需结合像素/PnP 抖动和目标速度调整。
+
+首次从有效观测中选择距离相机原点最近者，等距时用帧内检测 ID 决定顺序。之后只在预测位置 0.5 m 内选择最近且颜色/大小兼容的观测；颜色和大小门控可分别关闭。检测 ID 不参与跨帧身份匹配。锁定后不因另一个目标更靠近相机而重选，但同色同尺寸目标交叉仍可能错误关联，不能保证车体身份。
+
+没有关联观测时，只推进预测状态和协方差，保留轨迹 ID，`tracking=false`；有观测命中（含首次建立）才为 true。丢失时长从最后一次命中算起，严格超过 `lost_timeout_s=0.5` 才清除。清除后同一输入帧如有有效观测，可立即以新 ID 建轨。长输入间隔同样触发超时；暂停回放而没有输入不会自行更新。时间重复、倒退或 frame_id 改变重置状态，进程内 ID 计数保持递增。
+
+`ft_msgs/Track` 沿用输入 header，包含 id、tracking、position、velocity、position_predict。`id=0` 表示当前无轨迹，其数值字段为零占位；`id>0 && tracking=false` 表示已有轨迹的纯预测，不能把无轨迹的零位置当测量。非有限值及非正观测深度不会建轨或参与校正。`position_predict=position+T*velocity`，默认 T=0.1 s；它不推进下一帧的滤波状态，不包含弹道、旋转或相机运动补偿。
+
+`/ft/debug/marker` 使用三个固定 namespace/id：绿色球（0）为当前估计，橙色球（1）为未来位置，橙线（2）连接两者；纯预测时降低透明度。轨迹删除时发送三个 DELETE，避免把旧 marker 当当前轨迹。marker 时间与坐标系和 Track 一致，生命周期由 YAML 配置；空 frame_id 时用上一个有效坐标系删除旧标记。RViz 的 Tracking 显示订阅该话题。
+
+跟踪处理的是相机坐标系中的相对平移。车体旋转换面、相机运动、大小误分类和暂定 PnP 尺寸都可能影响它；第 9 点再处理车体旋转与选板。滤波接口依据：[OpenCV 4.2 KalmanFilter](https://docs.opencv.org/4.2.0/dd/d6a/classcv_1_1KalmanFilter.html)。

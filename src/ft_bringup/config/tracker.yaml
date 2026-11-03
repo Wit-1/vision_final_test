@@ -1,0 +1,20 @@
+detection_topic: /ft/detection
+track_topic: /ft/track
+marker_topic: /ft/debug/marker
+detection_queue_size: 1
+track_queue_size: 1
+marker_queue_size: 10
+
+# Initial trial values, not calibrated against ground truth.
+# White acceleration spectral density q; Q uses the actual image dt (see docs/design.md).
+process_noise_density: 2.0           # m^2/s^3
+measurement_noise_variance: 0.0025  # m^2; standard deviation 0.05 m
+initial_position_variance: 0.01     # m^2
+initial_velocity_variance: 4.0      # (m/s)^2
+association_distance_m: 0.5         # Nearest compatible observation around predicted position.
+match_color: true
+match_size: true
+lost_timeout_s: 0.5                 # Delete only when elapsed time is greater than this value.
+prediction_time_s: 0.1              # T: position_predict = position + velocity * T.
+marker_diameter_m: 0.06
+marker_lifetime_s: 0.6

@@ -1,0 +1,5 @@
+<launch>
+  <node pkg="ft_tracker" type="ft_tracker_node" name="ft_tracker" output="screen" required="true">
+    <rosparam command="load" file="$(find ft_bringup)/config/tracker.yaml" />
+  </node>
+</launch>

@@ -1,6 +1,6 @@
 # 视觉组最终考核：装甲板自瞄感知链路
 
-基于 ROS Noetic 和 OpenCV 的独立 catkin 工作空间，实现图像接入、传统装甲板识别、PnP、跨帧选解、检测消息发布及可视化。后续任务见 [PLAN.md](PLAN.md)。
+基于 ROS Noetic 和 OpenCV 的独立 catkin 工作空间，实现图像接入、传统装甲板识别、PnP、跨帧选解、检测消息、单板平移跟踪及可视化。后续任务见 [PLAN.md](PLAN.md)。
 
 ## 环境与构建
 
@@ -14,7 +14,7 @@
 ./run.sh test
 ```
 
-脚本自动加载 Noetic 和本项目环境，构建结果保存在本项目。测试包含 71 项 C++ 单元用例和 1 项端到端测试，验证范围见[验收记录](docs/acceptance.md)。
+脚本自动加载 Noetic 和本项目环境，构建结果保存在本项目。测试覆盖检测与跟踪的单元用例和实际节点链路，验证范围见[验收记录](docs/acceptance.md)。
 
 ## 运行
 
@@ -42,6 +42,8 @@ RViz 收到首份有效 CameraInfo 帧名后才打开，固定坐标系自动选
 | red_4 | task/red_4.bag |
 
 两个终端的数据集须一致；切换时先停止旧启动和回放。`gui:=false` 关闭 rqt，`rviz:=false` 关闭 RViz，均关闭可用于无桌面运行。
+
+默认同时启动跟踪；加 `tracker:=false` 可单独运行检测。RViz 的绿色球是当前估计，橙色球是 T 秒后的预测位置，纯预测时标记变淡。
 
 <details>
 <summary>不使用 run.sh 时的启动与回放命令</summary>
@@ -73,6 +75,8 @@ rosbag play --clock task/red_4.bag --topics /hk_camera/image_raw/compressed /hk_
 | 输出 | 内容 |
 |---|---|
 | `/ft/detection` | ft_detection/DetectionFrame，有效检测及带图像 header 的空检测帧 |
+| `/ft/track` | ft_msgs/Track，轨迹 ID、命中标志、位置、速度和提前量位置 |
+| `/ft/debug/marker` | 跟踪当前位置、未来位置和连线 |
 | `/ft/debug/image` | 框、角点 0～3、帧内 ID、颜色、大小、位姿轴及深度/重投影误差 |
 | `/ft/debug/mask/blue`、`/ft/debug/mask/red` | 蓝色、红色 HSV 掩膜 |
 | `/tf` | 相机坐标系到 `armor_<帧内ID>` 的变换 |
@@ -85,7 +89,13 @@ source devel/setup.bash
 rostopic echo --filter 'len(m.detections) > 0' -n 1 /ft/detection
 ```
 
-四点采用灯条端点，顺序为左上、右上、右下、左下。角点 x/y 单位像素、z 固定为 0；位姿和 TF 平移单位米，沿用图像时间戳。ID 仅在帧内有效，confidence 为传统几何评分。完整接口、坐标和选解约定见[设计说明](docs/design.md)。
+四点采用灯条端点，顺序为左上、右上、右下、左下。角点 x/y 单位像素、z 固定为 0；位姿和 TF 平移单位米，沿用图像时间戳。Detection.id 仅在帧内有效，confidence 为传统几何评分。完整接口、坐标和选解约定见[设计说明](docs/design.md)。
+
+## 跟踪参数
+
+[tracker.yaml](src/ft_bringup/config/tracker.yaml) 配置六维匀速卡尔曼滤波：状态为位置和速度，dt 来自图像时间戳。Q 采用随 dt 积分的白加速度噪声，q=2 m²/s³；R 初值为 0.0025 m²（位置标准差 5 cm），用于在观测抖动和响应速度间取一个试验起点。0.5 m 关联门限取题面建议的较宽端，后续结合目标速度和 PnP 抖动调整，均未由真值标定。
+
+首次选最近目标，之后在预测位置附近关联并保持锁定；漏检时 `tracking=false`，超过 0.5 s 删除。`id=0` 表示无轨迹，正 ID 表示已有轨迹；轨迹 ID 与帧内检测 ID 不同。`position_predict=position+T*velocity`，默认 T=0.1 s；模型、参数单位和已知限制见[设计说明](docs/design.md#单装甲板平移跟踪)。
 
 ## 当前限制与排查
 

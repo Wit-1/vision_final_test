@@ -16,6 +16,11 @@ Visualization Manager:
       Show Names: true
       Frames:
         All Enabled: true
+    - Class: rviz/Marker
+      Enabled: true
+      Name: Tracking
+      Marker Topic: /ft/debug/marker
+      Queue Size: 100
   Global Options:
     Background Color: 32; 32; 32
     Frame Rate: 30

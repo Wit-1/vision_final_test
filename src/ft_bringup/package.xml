@@ -7,6 +7,7 @@
   <license>BSD-3-Clause</license>
   <buildtool_depend>catkin</buildtool_depend>
   <exec_depend>ft_detector</exec_depend>
+  <exec_depend>ft_tracker</exec_depend>
   <exec_depend>roslaunch</exec_depend>
   <exec_depend>rosparam</exec_depend>
   <exec_depend>rosbag</exec_depend>
@@ -17,6 +18,8 @@
   <exec_depend>python3-yaml</exec_depend>
   <test_depend>rostest</test_depend>
   <test_depend>ft_detection</test_depend>
+  <test_depend>ft_msgs</test_depend>
+  <test_depend>visualization_msgs</test_depend>
   <test_depend>tf2_msgs</test_depend>
   <test_depend>python3-opencv</test_depend>
   <test_depend>python3-numpy</test_depend>
