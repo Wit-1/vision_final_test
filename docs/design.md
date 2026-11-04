@@ -49,11 +49,11 @@ buildDetectionOutput 检查数组对应、有效标志、候选/位姿 ID、重�
 
 W 是灯条中心距，L 是对应发光段的长度。坐标原点为两灯中心连线中点；X 沿板向右，Y 沿板向下，Z=X×Y，在正面观察时指向板背后，构成右手系。相机采用光学坐标：x 右、y 下、z 前。旋转后物体轴无需再与相机轴平行。
 
-图像点单位为像素；尺寸、平移、TF 和坐标轴长度统一为米；内部旋转向量为弧度。题面列出大板 235×127 mm、小板 120×125 mm，但未明确标注它们对应端点矩形 W×L 还是板本体 Wb×Hb。2026-11-02 本人先选择临时按题面尺寸使用，随后指定试改为小板 135×56 mm、大板 230×56 mm，并说明当前尺寸来源为 Alliance2026 开源项目。当前 YAML 为小板 0.135/0.056 m、大板 0.230/0.056 m；来源据本人提供，仍保留定义一及未与本素材实物核对的标记。
+图像点单位为像素；尺寸、平移、TF 和坐标轴长度统一为米；内部旋转向量为弧度。当前采用灯条端点模型，YAML 中小板 W/L 为 0.135/0.056 m、大板为 0.230/0.056 m，尺寸参考 Alliance2026 开源参数，尚未与本素材实物核对。
 
 YAML 中 small、large 分别保存 width_m、height_m、confirmed。confirmed 表示实际端点尺寸是否核实；小板和大板分别确认，不能用一个类别的确认替代另一个。
 
-allow_provisional_dimensions 默认在算法参数中为 false；当该开关关闭，未确认类别返回 dimensions_unconfirmed。当前 YAML 按本人选择显式开启临时开关，允许未确认但为正数的尺寸进入 PnP；零尺寸仍拒绝。PnpResult.provisional 标明本次使用了临时尺寸；valid 只代表软件几何检查合格，不代表物理尺度已核实。调试图的状态与每个合格位姿标签都会标注 provisional，TF 则使用同一个临时模型结果。
+allow_provisional_dimensions 默认在算法参数中为 false；当该开关关闭，未确认类别返回 dimensions_unconfirmed。当前 YAML 显式开启临时开关，允许未确认但为正数的尺寸进入 PnP；零尺寸仍拒绝。PnpResult.provisional 标明本次使用了临时尺寸；valid 只代表软件几何检查合格，不代表物理尺度已核实。调试图的状态与每个合格位姿标签都会标注 provisional，TF 则使用同一个临时模型结果。
 
 ## 相机模型
 
@@ -81,7 +81,7 @@ PoseHistory 只保存上一帧解算成功的候选和位姿，不生成跨帧 I
 
 节点先取得整帧参考并逐候选 solve，之后再 store，避免更新容器使参考指针失效。store 只保留本帧有效位姿，丢失或解算失败的目标不保留旧参考；无唯一匹配时当前帧独立初始化。图像时间重复、倒退或间隔超过 max_gap_s=0.1 会清空参考；标定 K/D、模型、尺寸或父坐标系改变、标定无效、图像与标定不匹配，以及图像处理异常也清空参考。只有 CameraInfo 时间戳更新而实际标定不变时不清空。
 
-重投影误差小只能检查像素对应的一致性，不能证明尺寸尺度正确。把 W、L 同时扩大一倍，平移也会扩大一倍而投影保持相同；测试中明确验证此行为。
+重投影误差小只能检查像素对应的一致性，不能证明尺寸尺度正确。把 W、L 同时扩大一倍，平移也会扩大一倍而投影保持相同。
 
 若只改 W 或 L，或将本体宽高暂配给灯条端点导致宽高比不符，影响还可能包括倾角与双解选择，不能视为统一的距离缩放。当前使用暂定端点尺寸；跨帧选解的验证范围见[验收记录](acceptance.md)，真实角度和米制尺度仍待核实。
 
@@ -112,6 +112,8 @@ pnp.enabled 关闭全部三维求解；pnp.publish_tf 仅关闭 TF 广播，合�
 RViz 通过 demo.launch 的 rviz 参数按需启动。view_rviz.py 从检测节点参数读取同一个 CameraInfo 话题，收到首个非空 frame_id 后以该固定帧启动 RViz；帧名改变时先停止原查看器再启动新查看器，相同帧名不会重启。关闭 RViz 后启动器退出，关闭 launch 时清理子进程。监控使用墙上时间，暂停 bag 的模拟时间不会阻塞清理。
 
 脚本不包含任何数据集名称分支，也不改写 CameraInfo、图像或 TF。固定帧不再通过额外的 launch 参数或 RViz 配置中的常量指定；真实相机坐标系由消息决定。
+
+统一 demo.launch 另有 reconfigure 参数，默认 false，控制 view_reconfigure.py。该脚本等待配置的动态服务后打开 rqt_reconfigure，并传入服务器命名空间供自动选择；等待服务使用墙上时间，初始没有 /clock 时仍可打开调参窗口。进入 GUI 前关闭辅助 rospy 节点，再用 exec 替换进程，roslaunch 继续管理该 GUI 的进程生命周期。gui、rviz、reconfigure 分别控制图像、三维和参数窗口；检测和默认启用的跟踪不依赖这些窗口。
 
 ## 接口依据
 
@@ -150,11 +152,11 @@ Q 来自连续白加速度模型，三个轴互相独立；每个轴的位置/�
 | tracker.yaml /ft_tracker | Q 的 q、R、初始协方差、关联/属性/丢失门限、T、话题/队列及 marker | 启动读取 |
 | datasets/*.yaml | bag 文件名；公共参数之后加载，同名键由数据集覆盖 | 启动/回放读取 |
 
-CameraInfo 继续提供 K、D、图像尺寸及实际 frame_id，不将内参写入 YAML。launch 通过 `$(find ft_bringup)` 找配置；run.sh 使用自身项目根定位。此前的 traditional/blue 等 HSV 路径统一迁移为 tuning/blue_h_min 等字段，最小面积和最大配对间距/角度差也迁入 tuning，其数值及算法判据保持原值。
+CameraInfo 继续提供 K、D、图像尺寸及实际 frame_id，不将内参写入 YAML。launch 通过 `$(find ft_bringup)` 找配置；run.sh 使用自身项目根定位。tuning 分组保存 18 项 HSV 边界、最小轮廓面积、最大配对间距和角度差；其余几何参数保存在 traditional 分组。
 
-Detector.cfg 声明 21 项字段、类型、单值范围和构建默认值，并生成 DetectorConfig.h/Python 配置。H 范围 0～179，S/V 为 0～255；面积 0.1～10000 px²，最大归一化间距 0.1～20，最大角度差 0.1～90°。自动测试逐项核对构建默认值与公共 YAML 一致。启动时先严格读取和验证 YAML，再将实际参数转换为配置；超出 UI 范围的启动值报错退出，避免静默截断。
+Detector.cfg 声明 21 项字段、类型、单值范围和构建默认值，并生成 DetectorConfig.h/Python 配置。H 范围 0～179，S/V 为 0～255；面积 0.1～10000 px²，最大归一化间距 0.1～20，最大角度差 0.1～90°。构建默认值与公共 YAML 保持一致。启动时先严格读取和验证 YAML，再将实际参数转换为配置；超出 UI 范围的启动值报错退出，避免静默截断。
 
-节点在 `/ft_detector/tuning` 建立动态服务，先 updateConfig 写入实际 YAML 初值，setConfigDefault 更新本实例的默认描述，再注册回调。这样数据集/测试覆盖后的初值与 rqt 的当前值、恢复默认值一致，不被构建默认值或上次运行的参数服务器残留覆盖。服务器使用外部递归互斥锁。
+节点在 `/ft_detector/tuning` 建立动态服务，先 updateConfig 写入实际 YAML 初值，setConfigDefault 更新本实例的默认描述，再注册回调。这样数据集覆盖后的初值与 rqt 的当前值、恢复默认值一致，不被构建默认值或上次运行的参数服务器残留覆盖。服务器使用外部递归互斥锁。
 
 tuning_parameters.hpp/cpp 在算法参数与生成配置之间转换。paramsWithTuning 先复制现有 TraditionalParams，再改 21 项，因此未暴露的几何参数保留。ft_detector_tuning 是依赖生成配置的适配库，原 ft_detector_core 仍不依赖 ROS。CMake 显式依赖 gencfg，生成物保留在构建目录。
 

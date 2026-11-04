@@ -2,6 +2,7 @@
   <arg name="dataset" default="blue_1" />
   <arg name="gui" default="true" />
   <arg name="rviz" default="false" />
+  <arg name="reconfigure" default="false" />
   <arg name="tracker" default="true" />
   <arg name="use_sim_time" default="true" />
 
@@ -16,5 +17,6 @@
   <include file="$(find ft_bringup)/launch/visualization.launch">
     <arg name="gui" value="$(arg gui)" />
     <arg name="rviz" value="$(arg rviz)" />
+    <arg name="reconfigure" value="$(arg reconfigure)" />
   </include>
 </launch>

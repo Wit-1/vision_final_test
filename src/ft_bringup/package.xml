@@ -16,13 +16,6 @@
   <exec_depend>rviz</exec_depend>
   <exec_depend>rospy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
-  <test_depend>rostest</test_depend>
-  <test_depend>dynamic_reconfigure</test_depend>
-  <test_depend>ft_detection</test_depend>
-  <test_depend>ft_msgs</test_depend>
-  <test_depend>visualization_msgs</test_depend>
-  <test_depend>tf2_msgs</test_depend>
-  <test_depend>python3-opencv</test_depend>
-  <test_depend>python3-numpy</test_depend>
 </package>

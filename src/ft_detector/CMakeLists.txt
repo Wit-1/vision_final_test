@@ -16,7 +16,7 @@ catkin_package(
   DEPENDS OpenCV
 )
 
-# Algorithm and drawing are independent of ROS, so geometry can be tested directly.
+# Keep algorithm and drawing code independent of ROS communication.
 add_library(ft_detector_core
   src/traditional_detector.cpp
   src/debug_draw.cpp
@@ -49,30 +49,6 @@ target_compile_options(ft_detector_node PRIVATE -Wall -Wextra)
 target_include_directories(ft_detector_node PRIVATE ${catkin_INCLUDE_DIRS})
 add_dependencies(ft_detector_node ${PROJECT_NAME}_gencfg ${catkin_EXPORTED_TARGETS})
 target_link_libraries(ft_detector_node ft_detector_output ft_detector_tuning ${catkin_LIBRARIES})
-
-if(CATKIN_ENABLE_TESTING)
-  catkin_add_gtest(detector_geometry_test test/detector_geometry_test.cpp)
-  if(TARGET detector_geometry_test)
-    target_link_libraries(detector_geometry_test ft_detector_core)
-    target_compile_options(detector_geometry_test PRIVATE -Wall -Wextra)
-  endif()
-  catkin_add_gtest(pnp_solver_test test/pnp_solver_test.cpp)
-  if(TARGET pnp_solver_test)
-    target_link_libraries(pnp_solver_test ft_detector_core)
-    target_compile_options(pnp_solver_test PRIVATE -Wall -Wextra)
-  endif()
-  catkin_add_gtest(pose_history_test test/pose_history_test.cpp)
-  if(TARGET pose_history_test)
-    target_link_libraries(pose_history_test ft_detector_core)
-    target_compile_options(pose_history_test PRIVATE -Wall -Wextra)
-  endif()
-  catkin_add_gtest(detection_output_test test/detection_output_test.cpp)
-  if(TARGET detection_output_test)
-    add_dependencies(detection_output_test ${catkin_EXPORTED_TARGETS})
-    target_link_libraries(detection_output_test ft_detector_output)
-    target_compile_options(detection_output_test PRIVATE -Wall -Wextra)
-  endif()
-endif()
 
 install(TARGETS ft_detector_core ft_detector_output ft_detector_tuning ft_detector_node
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}

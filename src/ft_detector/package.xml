@@ -18,5 +18,4 @@
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
   <exec_depend>compressed_image_transport</exec_depend>
-  <test_depend>gtest</test_depend>
 </package>

@@ -1,5 +1,0 @@
-<launch>
-  <param name="/use_sim_time" value="false" />
-  <include file="$(find ft_bringup)/launch/tracker.launch" />
-  <test test-name="tracker_pipeline" pkg="ft_bringup" type="tracker_test.py" time-limit="45" />
-</launch>

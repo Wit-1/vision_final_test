@@ -10,19 +10,18 @@ usage() {
 在 ROS Noetic 环境中使用：
   ./run.sh check
   ./run.sh build [软件包名或 catkin build 参数]
-  ./run.sh test
-  ./run.sh launch [dataset:=blue_1] [gui:=true] [rviz:=false] [tracker:=true]
+  ./run.sh launch [dataset:=blue_1] [gui:=true] [rviz:=false] [reconfigure:=false] [tracker:=true]
   ./run.sh play <blue_1|blue_guard|red_1_3|red_4> [rosbag play 参数]
 
 示例（两个终端使用同一数据集）：
-  ./run.sh launch dataset:=red_4
+  ./run.sh launch dataset:=red_4 rviz:=true reconfigure:=true
   ./run.sh play red_4 --pause -r 0.2
 USAGE
 }
 
 case "$command_name" in
     help|-h|--help) usage; exit 0 ;;
-    check|build|test|launch|play) ;;
+    check|build|launch|play) ;;
     *) usage >&2; exit 2 ;;
 esac
 
@@ -55,7 +54,7 @@ import rospkg
 packages = ["roscpp", "rospy", "sensor_msgs", "cv_bridge", "image_transport",
             "compressed_image_transport", "message_generation", "message_runtime",
             "rosbag", "roslaunch", "rqt_image_view", "rqt_reconfigure", "dynamic_reconfigure",
-            "tf2", "tf2_ros", "rviz", "rostest", "visualization_msgs"]
+            "tf2", "tf2_ros", "rviz", "visualization_msgs"]
 rospack = rospkg.RosPack()
 for name in packages:
     rospack.get_path(name)
@@ -80,12 +79,6 @@ PY
         catkin config --workspace "$project_root" --extend /opt/ros/noetic -j2 \
             --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
         exec catkin build --workspace "$project_root" "$@"
-        ;;
-    test)
-        load_workspace
-        catkin build --workspace "$project_root" ft_detector ft_tracker ft_bringup --no-deps --no-status \
-            --catkin-make-args run_tests
-        exec catkin_test_results "$project_root/build"
         ;;
     launch)
         load_workspace

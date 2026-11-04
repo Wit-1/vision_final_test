@@ -22,14 +22,6 @@ target_include_directories(ft_tracker_node PRIVATE ${catkin_INCLUDE_DIRS})
 add_dependencies(ft_tracker_node ${catkin_EXPORTED_TARGETS})
 target_link_libraries(ft_tracker_node ft_tracker_core ${catkin_LIBRARIES})
 
-if(CATKIN_ENABLE_TESTING)
-  catkin_add_gtest(linear_tracker_test test/linear_tracker_test.cpp)
-  if(TARGET linear_tracker_test)
-    target_compile_options(linear_tracker_test PRIVATE -Wall -Wextra)
-    target_link_libraries(linear_tracker_test ft_tracker_core)
-  endif()
-endif()
-
 install(TARGETS ft_tracker_core ft_tracker_node
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}

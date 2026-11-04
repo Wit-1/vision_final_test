@@ -1,8 +1,12 @@
 <launch>
   <arg name="gui" default="true" />
   <arg name="rviz" default="false" />
+  <arg name="reconfigure" default="false" />
   <node if="$(arg gui)" pkg="ft_bringup" type="view_debug_image.sh" name="ft_image_view" output="screen" />
   <node if="$(arg rviz)" pkg="ft_bringup" type="view_rviz.py" name="ft_rviz_launcher" output="screen">
     <param name="config" value="$(find ft_bringup)/rviz/vision.rviz" />
+  </node>
+  <node if="$(arg reconfigure)" pkg="ft_bringup" type="view_reconfigure.py" name="ft_reconfigure" output="screen">
+    <param name="server" value="/ft_detector/tuning" />
   </node>
 </launch>
