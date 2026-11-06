@@ -7,7 +7,7 @@
 ```text
 原始 compressed 图像 + CameraInfo
   → detector_node：压缩解码、标定缓存和参数
-  → TraditionalDetector：二维灯条与 ArmorCandidate
+  → TraditionalDetector 或 NnDetector：共用 ArmorCandidate
   → PoseHistory.references：上一帧中唯一匹配的位姿参考
   → PnpSolver：几何校验、平面候选、带条件的跨帧消歧与重投影
   → PoseHistory.store：整帧求解结束后保存本帧合格目标
@@ -30,7 +30,7 @@
 | pose.position | 该装甲板原点在相机系的位置，直接使用 tvec，单位米 |
 | pose.orientation | rvec→旋转矩阵→归一化四元数，直接表示装甲板到相机的旋转 |
 | corners[4] | 原图像像素的 TL/TR/BR/BL；Point32 的 z 固定为 0 |
-| confidence | 当前传统几何评分 1/(1+cost)，不是概率，也不是参考 bag 中的占位 1.0 |
+| confidence | 传统为 1/(1+cost)，NN 为颜色分数×编号分数；均非标定概率 |
 
 buildDetectionOutput 检查数组对应、有效标志、候选/位姿 ID、重复 ID、有限值和评分范围；不合格候选不进入消息及其 TF。消息和 TF 共用同一个 geometry_msgs/Pose，不分别计算四元数。Point32 的二维像素不能按位置米制字段解释。三维尺寸仍是暂定来源，消息没有另加尺寸确认字段。
 
@@ -147,6 +147,8 @@ Q 来自连续白加速度模型，三个轴互相独立；每个轴的位置/�
 |---|---|---|
 | detector.yaml 根 /ft_detector | 相机和输出话题、队列、transport、debug_details | 启动读取 |
 | detector.yaml tuning /ft_detector/tuning | 蓝色与两段红色共 18 项 HSV 边界、最小面积、最大配对间距/角度差 | 启动读取及 dynamic_reconfigure |
+| model.yaml tuning /ft_detector/tuning | NN 颜色/编号/联合分数和 NMS IoU 门限 | 启动读取及 dynamic_reconfigure |
+| model.yaml nn /ft_detector/nn | 模型路径、输入尺寸、补边值、线程数和候选数量上限 | 启动读取 |
 | detector.yaml traditional /ft_detector/traditional | 灯条长度、长宽比、填充率、倾角、配对长度/高度差、最小间距、大小分界及歧义规则 | 启动读取 |
 | detector.yaml pnp /ft_detector/pnp | 大小板端点尺寸及确认标记、深度/重投影门限、历史消歧与 TF 参数 | 启动读取 |
 | tracker.yaml /ft_tracker | Q 的 q、R、初始协方差、关联/属性/丢失门限、T、话题/队列及 marker | 启动读取 |
@@ -154,12 +156,52 @@ Q 来自连续白加速度模型，三个轴互相独立；每个轴的位置/�
 
 CameraInfo 继续提供 K、D、图像尺寸及实际 frame_id，不将内参写入 YAML。launch 通过 `$(find ft_bringup)` 找配置；run.sh 使用自身项目根定位。tuning 分组保存 18 项 HSV 边界、最小轮廓面积、最大配对间距和角度差；其余几何参数保存在 traditional 分组。
 
-Detector.cfg 声明 21 项字段、类型、单值范围和构建默认值，并生成 DetectorConfig.h/Python 配置。H 范围 0～179，S/V 为 0～255；面积 0.1～10000 px²，最大归一化间距 0.1～20，最大角度差 0.1～90°。构建默认值与公共 YAML 保持一致。启动时先严格读取和验证 YAML，再将实际参数转换为配置；超出 UI 范围的启动值报错退出，避免静默截断。
+Detector.cfg 声明 21 项传统字段及 4 项 NN 字段，生成 DetectorConfig.h/Python 配置。H 范围 0～179，S/V 为 0～255；面积 0.1～10000 px²，最大归一化间距 0.1～20，最大角度差 0.1～90°；NN 分数及 IoU 为 0～1。构建默认值分别与 detector.yaml、model.yaml 保持一致。启动时先验证 YAML，再写入动态配置；超出 UI 范围的启动值报错退出。
 
 节点在 `/ft_detector/tuning` 建立动态服务，先 updateConfig 写入实际 YAML 初值，setConfigDefault 更新本实例的默认描述，再注册回调。这样数据集覆盖后的初值与 rqt 的当前值、恢复默认值一致，不被构建默认值或上次运行的参数服务器残留覆盖。服务器使用外部递归互斥锁。
 
 tuning_parameters.hpp/cpp 在算法参数与生成配置之间转换。paramsWithTuning 先复制现有 TraditionalParams，再改 21 项，因此未暴露的几何参数保留。ft_detector_tuning 是依赖生成配置的适配库，原 ft_detector_core 仍不依赖 ROS。CMake 显式依赖 gencfg，生成物保留在构建目录。
 
-当前节点用单线程 ros::spin，图像和配置回调依次执行。在线回调调用已有 setParams，先校验完整组合再替换；HSV 下限大于上限、最大配对间距不大于大小分界、NaN 等组合会恢复上一次完整有效配置，服务响应、参数服务器与 rqt 同步恢复。单值越界由动态服务先限制到 cfg 范围，组合合法性仍由算法校验。参数有效且确实改变时清空旧 PnP 参考；跟踪节点按实际检测结果处理空帧与关联。
+当前节点用单线程 ros::spin，图像和配置回调依次执行。在线回调先验证传统与 NN 的完整候选配置，再替换各自算法参数；HSV 下限大于上限、配对关系非法或 NaN 等会使 25 项整组恢复上一次有效配置。单值越界由动态服务先限制到 cfg 范围，组合合法性仍由算法校验。有效变化清空旧 PnP 参考；NN 阈值更新不重新加载模型。
 
 在线修改更新内存对象和参数服务器，不写 YAML。仅 rosparam set 或修改磁盘 YAML 不会自动重建算法；需调用动态服务/rqt，或改 YAML 后重启。恢复默认指本次启动加载的 YAML 值；要跨次运行保留调整，手动写回 YAML。该行为依据已安装 Noetic 实现及 [dynamic_reconfigure Server 源码](https://github.com/ros/dynamic_reconfigure/blob/noetic-devel/include/dynamic_reconfigure/server.h)。
+
+## 神经网络识别
+
+### 运行库与模型资源（8.1）
+
+在线推理由 ONNX Runtime 1.22.0 的 C++ CPU Session 执行，相关实现位于 nn_detector.hpp/cpp。该库使用 C++17，公共头文件通过 Impl 隐藏第三方类型；CMake 从 ONNXRUNTIME_ROOT 查找 SDK，默认是项目 .deps/onnxruntime。SDK 安装入口为 setup_inference.sh，下载官方 Linux x86_64 包并核对 SHA-256；不改变系统 OpenCV。参考：[官方发布](https://github.com/microsoft/onnxruntime/releases/tag/v1.22.0)、[Session API](https://onnxruntime.ai/docs/api/c/struct_ort_1_1_session.html)。
+
+prepare_model.py 使用本地 ONNX 1.17.0、NumPy 1.24.4、protobuf 4.25.3，读取 task/nn_model.zip，保存原模型 armor.original.onnx、运行模型 armor.onnx、两张原始样例及 manifest.json。模型 IR=10、opset=22，内部包含 FP16 权重，输入输出为 float32。原模型图有 250 个节点，派生模型按依赖稳定排序；不改变节点属性、权重数值或精度，准备时逐项核对序列化内容并执行 ONNX checker。哈希与工具版本保存于清单。图的节点须满足依赖顺序，见 [ONNX IR](https://onnx.ai/onnx/repo-docs/IR.html#graphs)。
+
+节点仅在 mode=nn 或 compare_modes=true 时创建 Session，启动时检查输入/输出名称、类型、数量和形状。缺模型或协议不符明确退出，不切换为其他算法。Python 只参与资源准备，在线没有 Python 推理或现成检测框架。
+
+### 预处理和坐标恢复（8.2）
+
+给定原图 W×H，以 min(640/W,480/H) 缩放，取整后居中补齐到 640×480，像素值为 124。奇数补边的多余像素放在右侧/下侧。保存实际 resized_size、scale_x/scale_y 和左/上补边；取整后的两轴实际比例用于反变换，避免奇数尺寸的舍入偏差。
+
+BGR 转 RGB，像素除以 255，并将交错的 HWC 像素拆入连续的 NCHW `[1,3,480,640]`。NnInput 持有这段 float 内存，生命周期覆盖同步 Session::Run。逆变换为 x=(u-left)/scale_x、y=(v-top)/scale_y，不裁剪角点以伪造完整板。
+
+### 输出解码与去重（8.3）
+
+输出为 `[1,21,6300]`，读取索引 channel×6300+candidate，不将其当作 6300×21 的连续候选行。
+
+| 通道 | 含义 |
+|---|---|
+| 0～3 | 蓝、红、熄灭、其他的分数；只保留胜出类别为蓝/红的候选 |
+| 4～12 | 哨兵、1、2、3、4、5、前哨站、基地、基地的分数 |
+| 13～20 | 模型画布四点，顺序左上、左下、右下、右上 |
+
+分数不再 sigmoid。颜色与编号分别 argmax，再检查颜色≥0.5、编号≥0.5、乘积≥0.25。拒绝非有限/越范围分数、非有限/越界角点、非凸或反向四边形，以及不满足公共最小面积/边长的候选。角点按 0/3/2/1 转为共用 TL/TR/BR/BL 并反变换。
+
+以分数乘积降序排序，相同分数用原输出索引决定顺序，最多取 300 个合法候选；对四点外接框做跨颜色/编号的贪心 NMS，IoU>0.5 时抑制后来的低分候选。保留结果按中心 x/y 排序，重新赋帧内 ID。四项分数/IoU 门限支持在线调整，候选上限启动读取。
+
+模型没有大小输出。大小判别沿用中心距/平均灯条长度的几何比值，分界为 traditional/large_armor_min_spacing_ratio（默认 3.4）；透视压缩会影响分类。number_class 保留模型的 0～8 类别，调试图显示 #1、#3 等；原消息没有编号字段，因此不改写 Detection.id 或消息定义。
+
+### 共用位姿与对比（8.4、8.5）
+
+两种识别返回 ArmorCandidate，选中模式共用 PnpSolver、PoseHistory、buildDetectionOutput 和跟踪节点。DetectionFrame、TF、debug、comparison 沿用输入图像 header；模型未检出时发布空检测帧。HSV 掩膜只在执行传统识别时发布。
+
+mode 为启动参数 tradition/nn，compare_modes 默认 false。开启时同一原图执行两种识别，在 /ft/debug/comparison 左右显示传统和 NN 的四点、编号、位姿；默认各缩放 0.5。只有选中模式发布业务检测和 TF 并更新位姿历史；另一侧使用同一 PnP 的单帧解，不更新历史或创建另一条跟踪链路。
+
+所有耗时用 steady_clock。FT_TIMING 给出各阶段累计平均值与各自样本数，退出时输出带 FINAL 前缀的完整汇总；回调均值包括解码后图像的接入、识别、PnP、绘图和发布准备，对比开启时还包含另一分支和拼图。它不含 compressed 插件解码、网络传输、排队及下游跟踪。NN pre/infer/post 均值分别覆盖张量准备、同步 Run、解码去重；不包括模型加载，不剔除首帧。OpenCV 和 ORT intra-op 均配置为 2 线程，ORT inter-op 为 1。

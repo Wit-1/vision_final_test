@@ -1,5 +1,7 @@
 <launch>
   <arg name="dataset" default="blue_1" />
+  <arg name="mode" default="tradition" />
+  <arg name="compare_modes" default="false" />
   <arg name="gui" default="true" />
   <arg name="rviz" default="false" />
   <arg name="reconfigure" default="false" />
@@ -10,6 +12,8 @@
 
   <include file="$(find ft_bringup)/launch/detector.launch">
     <arg name="dataset" value="$(arg dataset)" />
+    <arg name="mode" value="$(arg mode)" />
+    <arg name="compare_modes" value="$(arg compare_modes)" />
   </include>
 
   <include if="$(arg tracker)" file="$(find ft_bringup)/launch/tracker.launch" />

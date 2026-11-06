@@ -124,6 +124,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │           └── vision.rviz
 │
 ├── tools/                            # 开发辅助工具，不参与在线算法
+│   ├── setup_inference.sh            # 安装本地 C++ 推理与模型准备依赖
 │   ├── prepare_model.py              # 原模型检查、节点排序、哈希记录
 │   └── summarize_timings.py          # 处理耗时数据，计算平均和 P95
 │

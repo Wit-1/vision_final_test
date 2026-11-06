@@ -9,8 +9,10 @@ usage() {
     cat <<'USAGE'
 在 ROS Noetic 环境中使用：
   ./run.sh check
+  ./run.sh setup-inference
+  ./run.sh prepare-model
   ./run.sh build [软件包名或 catkin build 参数]
-  ./run.sh launch [dataset:=blue_1] [gui:=true] [rviz:=false] [reconfigure:=false] [tracker:=true]
+  ./run.sh launch [dataset:=blue_1] [mode:=tradition|nn] [compare_modes:=false] [gui:=true] [rviz:=false] [reconfigure:=false] [tracker:=true]
   ./run.sh play <blue_1|blue_guard|red_1_3|red_4> [rosbag play 参数]
 
 示例（两个终端使用同一数据集）：
@@ -21,7 +23,7 @@ USAGE
 
 case "$command_name" in
     help|-h|--help) usage; exit 0 ;;
-    check|build|launch|play) ;;
+    check|setup-inference|prepare-model|build|launch|play) ;;
     *) usage >&2; exit 2 ;;
 esac
 
@@ -48,6 +50,7 @@ case "$command_name" in
     check)
         command -v catkin >/dev/null
         python3 - <<'PY'
+from pathlib import Path
 import cv2
 import rospkg
 
@@ -59,7 +62,17 @@ rospack = rospkg.RosPack()
 for name in packages:
     rospack.get_path(name)
 print("ROS Noetic 基础依赖可用，OpenCV " + cv2.__version__)
+runtime = Path('.deps/onnxruntime')
+if not (runtime/'include/onnxruntime_cxx_api.h').is_file() or not (runtime/'lib/libonnxruntime.so').is_file():
+    raise SystemExit('缺少本地 ONNX Runtime，请先运行 ./run.sh setup-inference。')
+print('ONNX Runtime C++ CPU ' + (runtime/'VERSION_NUMBER').read_text().strip())
 PY
+        ;;
+    setup-inference)
+        exec bash "$project_root/tools/setup_inference.sh"
+        ;;
+    prepare-model)
+        exec python3 "$project_root/tools/prepare_model.py"
         ;;
     build)
         # catkin init normally searches upward; create metadata at this exact root.

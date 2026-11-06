@@ -6,6 +6,8 @@
   <maintainer email="268838183+Wit-1@users.noreply.github.com">Wit</maintainer>
   <license>BSD-3-Clause</license>
   <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>curl</build_depend>
+  <build_depend>python3-pip</build_depend>
   <depend>roscpp</depend>
   <depend>sensor_msgs</depend>
   <depend>cv_bridge</depend>
@@ -13,6 +15,7 @@
   <depend>ft_detection</depend>
   <depend>dynamic_reconfigure</depend>
   <depend>libopencv-dev</depend>
+  <!-- ONNX Runtime C++ is installed locally by tools/setup_inference.sh and found by CMake. -->
   <depend>geometry_msgs</depend>
   <depend>std_msgs</depend>
   <depend>tf2</depend>

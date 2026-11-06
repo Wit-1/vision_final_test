@@ -43,9 +43,15 @@ cv::Mat drawDetections(const cv::Mat& bgr, const DetectionResult& result, bool d
       cv::putText(debug, std::to_string(i), armor.corners[i] + offsets[i],
                   cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(230, 230, 230), 1, cv::LINE_AA);
     }
-    const std::string label = "ID " + std::to_string(armor.id) +
+    std::string label = "ID " + std::to_string(armor.id) +
                               (armor.is_red ? " RED " : " BLUE ") +
                               (armor.is_large_armor ? "LARGE" : "SMALL");
+    if (armor.number_class >= 0 && armor.number_class < 9) {
+      const char* names[] = {"SENTRY", "1", "2", "3", "4", "5", "OUTPOST", "BASE", "BASE"};
+      std::ostringstream score;
+      score << std::fixed << std::setprecision(2) << armor.confidence;
+      label += " #" + std::string(names[armor.number_class]) + " c=" + score.str();
+    }
     const auto box = cv::boundingRect(std::vector<cv::Point2f>(armor.corners.begin(), armor.corners.end()));
     cv::putText(debug, label, cv::Point(box.x, std::max(18, box.y - 8)),
                 cv::FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv::LINE_AA);

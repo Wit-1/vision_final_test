@@ -1,0 +1,20 @@
+# These fields are shared by both modes; mode and compare_modes are launch arguments.
+processing_threads: 2
+comparison_topic: /ft/debug/comparison
+comparison_scale: 0.5
+
+nn:
+  # roslaunch expands the package path; no personal workspace path is required.
+  model_path: "$(find ft_bringup)/../../assets/models/armor.onnx"
+  input_width: 640
+  input_height: 480
+  pad_value: 124
+  cpu_threads: 2
+  max_candidates: 300
+
+# Loaded after detector.yaml; the original 21 traditional fields remain in place.
+tuning:
+  nn_min_color_score: 0.5
+  nn_min_number_score: 0.5
+  nn_min_confidence: 0.25
+  nn_nms_iou: 0.5

@@ -1,11 +1,15 @@
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <iomanip>
 #include <memory>
 #include <stdexcept>
+#include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <cv_bridge/cv_bridge.h>
@@ -16,10 +20,12 @@
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
 #include <std_msgs/Header.h>
+#include <opencv2/imgproc.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include "ft_detector/debug_draw.hpp"
 #include "ft_detector/detection_output.hpp"
+#include "ft_detector/nn_detector.hpp"
 #include "ft_detector/pnp_solver.hpp"
 #include "ft_detector/pose_history.hpp"
 #include "ft_detector/traditional_detector.hpp"
@@ -37,6 +43,7 @@ class DetectorNode {
     debug_details_ = requiredParam<bool>("debug_details");
     traditional_params_ = loadTraditionalParams();
     detector_.reset(new ft_detector::TraditionalDetector(traditional_params_));
+    initializeModels();
     pnp_enabled_ = requiredParam<bool>("pnp/enabled");
     publish_tf_ = requiredParam<bool>("pnp/publish_tf");
     child_frame_prefix_ = requiredParam<std::string>("pnp/child_frame_prefix");
@@ -74,6 +81,7 @@ class DetectorNode {
     debug_publisher_ = image_transport_.advertise(debug_image_topic, debug_queue);
     blue_mask_publisher_ = image_transport_.advertise(blue_mask_topic, debug_queue);
     red_mask_publisher_ = image_transport_.advertise(red_mask_topic, debug_queue);
+    if (compare_modes_) comparison_publisher_ = image_transport_.advertise(comparison_topic_, debug_queue);
     detection_publisher_ = nh_.advertise<ft_detection::DetectionFrame>(detection_topic, detection_queue);
     camera_info_subscriber_ = nh_.subscribe(camera_info_topic, camera_info_queue,
                                            &DetectorNode::cameraInfoCallback, this);
@@ -89,7 +97,31 @@ class DetectorNode {
                                    << ", debug: " << debug_image_topic << ", detections: " << detection_topic);
   }
 
+  ~DetectorNode() {
+    if (frame_count_ > 0) std::clog << "FINAL " << timingSummary() << std::endl;
+  }
+
  private:
+  using Clock = std::chrono::steady_clock;
+
+  static double elapsedMs(Clock::time_point start) {
+    return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+  }
+
+  std::string timingSummary() const {
+    const auto traditional_count = std::max<std::uint64_t>(1, traditional_frames_);
+    const auto nn_count = std::max<std::uint64_t>(1, nn_frames_);
+    std::ostringstream summary;
+    summary << std::fixed << std::setprecision(3)
+            << "FT_TIMING mode=" << mode_ << " compare=" << compare_modes_ << " frames=" << frame_count_
+            << " traditional_frames=" << traditional_frames_ << " nn_frames=" << nn_frames_
+            << " mean_ms traditional=" << traditional_sum_ms_ / traditional_count
+            << " nn_pre=" << nn_pre_sum_ms_ / nn_count << " nn_infer=" << nn_infer_sum_ms_ / nn_count
+            << " nn_post=" << nn_post_sum_ms_ / nn_count
+            << " callback=" << frame_sum_ms_ / std::max<std::uint64_t>(1, frame_count_);
+    return summary.str();
+  }
+
   template <typename T>
   T requiredParam(const std::string& name) const {
     T value;
@@ -147,8 +179,46 @@ class DetectorNode {
     return params;
   }
 
+  void initializeModels() {
+    mode_ = requiredParam<std::string>("mode");
+    compare_modes_ = requiredParam<bool>("compare_modes");
+    if (mode_ != "tradition" && mode_ != "nn")
+      throw std::invalid_argument("mode must be tradition or nn");
+    comparison_topic_ = requiredParam<std::string>("comparison_topic");
+    comparison_scale_ = requiredParam<double>("comparison_scale");
+    const int threads = requiredParam<int>("processing_threads");
+    if (threads <= 0 || comparison_topic_.empty() || !std::isfinite(comparison_scale_) ||
+        comparison_scale_ <= 0.0 || comparison_scale_ > 1.0)
+      throw std::invalid_argument("Invalid processing threads, comparison topic or scale");
+    cv::setNumThreads(threads);
+    nn_params_.model_path = requiredParam<std::string>("nn/model_path");
+    nn_params_.input_width = requiredParam<int>("nn/input_width");
+    nn_params_.input_height = requiredParam<int>("nn/input_height");
+    nn_params_.pad_value = requiredParam<int>("nn/pad_value");
+    nn_params_.cpu_threads = requiredParam<int>("nn/cpu_threads");
+    nn_params_.max_candidates = requiredParam<int>("nn/max_candidates");
+    nn_params_.large_armor_min_spacing_ratio = traditional_params_.large_armor_min_spacing_ratio;
+    nn_params_.min_quad_area_px2 = requiredParam<double>("pnp/min_quad_area_px2");
+    nn_params_.min_edge_length_px = requiredParam<double>("pnp/min_edge_length_px");
+    nn_params_.thresholds = {requiredParam<double>("tuning/nn_min_color_score"),
+        requiredParam<double>("tuning/nn_min_number_score"), requiredParam<double>("tuning/nn_min_confidence"),
+        requiredParam<double>("tuning/nn_nms_iou")};
+    ft_detector::NnDetector::validateParams(nn_params_);
+    if (mode_ == "nn" || compare_modes_) {
+      nn_detector_.reset(new ft_detector::NnDetector(nn_params_));
+      ROS_INFO_STREAM("Neural backend: ONNX Runtime " << ft_detector::NnDetector::backendVersion()
+                      << " CPU, threads=" << nn_params_.cpu_threads << ", model=" << nn_params_.model_path);
+    }
+    ROS_INFO_STREAM("Detection mode=" << mode_ << " compare_modes=" << compare_modes_
+                    << " OpenCV_threads=" << threads);
+  }
+
   void initializeTuning() {
     active_tuning_ = ft_detector::tuningFromParams(traditional_params_);
+    active_tuning_.nn_min_color_score = nn_params_.thresholds.color_score;
+    active_tuning_.nn_min_number_score = nn_params_.thresholds.number_score;
+    active_tuning_.nn_min_confidence = nn_params_.thresholds.confidence;
+    active_tuning_.nn_nms_iou = nn_params_.thresholds.nms_iou;
     auto clamped = active_tuning_;
     clamped.__clamp__();
     if (active_tuning_.__level__(clamped) != 0)
@@ -162,8 +232,14 @@ class DetectorNode {
     tuning_server_->setCallback([this](ft_detector::DetectorConfig& config, std::uint32_t) {
       try {
         const auto next = ft_detector::paramsWithTuning(traditional_params_, config);
+        auto next_nn = nn_params_;
+        next_nn.thresholds = {config.nn_min_color_score, config.nn_min_number_score,
+                              config.nn_min_confidence, config.nn_nms_iou};
+        ft_detector::NnDetector::validateParams(next_nn);
         const bool changed = active_tuning_.__level__(config) != 0;
         detector_->setParams(next);  // Validates the complete combination before changing the algorithm.
+        if (nn_detector_) nn_detector_->setThresholds(next_nn.thresholds);
+        nn_params_ = next_nn;
         traditional_params_ = next;
         active_tuning_ = config;
         if (changed) {
@@ -224,8 +300,46 @@ class DetectorNode {
     }
   }
 
+  struct PoseEvaluation {
+    std::vector<ft_detector::PnpResult> poses;
+    std::string status;
+  };
+
+  PoseEvaluation estimatePoses(const std::vector<ft_detector::ArmorCandidate>& armors,
+                               double stamp, bool calibration_ready, bool update_history) {
+    PoseEvaluation evaluation;
+    evaluation.poses.resize(armors.size());
+    evaluation.status = pnp_enabled_ ? "awaiting_camera_info" : "disabled";
+    for (std::size_t i = 0; i < armors.size(); ++i) {
+      evaluation.poses[i].pose.id = armors[i].id;
+      evaluation.poses[i].reason = evaluation.status;
+    }
+    if (pnp_enabled_ && calibration_ready) {
+      std::vector<const ft_detector::ArmorPose*> references(armors.size(), nullptr);
+      if (update_history && pose_continuity_enabled_)
+        references = pose_history_->references(armors, stamp);
+      for (std::size_t i = 0; i < armors.size(); ++i)
+        evaluation.poses[i] = pnp_solver_->solve(armors[i], calibration_, references[i]);
+      if (update_history && pose_continuity_enabled_) pose_history_->store(armors, evaluation.poses, stamp);
+      evaluation.status = evaluation.poses.empty() ? "no_candidates" : evaluation.poses.front().reason;
+      if (std::any_of(evaluation.poses.begin(), evaluation.poses.end(), [](const auto& pose) { return pose.valid; })) {
+        const bool provisional = std::any_of(evaluation.poses.begin(), evaluation.poses.end(),
+            [](const auto& pose) { return pose.valid && pose.provisional; });
+        evaluation.status = provisional ? "provisional" : "ready";
+      }
+    }
+    if (update_history && (!pnp_enabled_ || !pose_continuity_enabled_)) pose_history_->reset();
+    return evaluation;
+  }
+
+  static void labelMode(cv::Mat& image, const std::string& mode) {
+    cv::putText(image, "Mode: " + mode, cv::Point(12, std::max(18, image.rows - 12)),
+                cv::FONT_HERSHEY_SIMPLEX, 0.75, cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
+  }
+
   void imageCallback(const sensor_msgs::ImageConstPtr& message) {
     try {
+      const auto frame_start = Clock::now();
       // 编码相同时共享解码后的像素；压缩解码和发布输出仍有各自的数据分配。
       const auto shared_image = cv_bridge::toCvShare(message, sensor_msgs::image_encodings::BGR8);
       if (shared_image->image.empty()) {
@@ -242,45 +356,61 @@ class DetectorNode {
         ROS_WARN_THROTTLE(1.0, "No matching CameraInfo; 2D detection continues while calibration is unavailable");
       }
 
-      const auto result = detector_->detect(shared_image->image);
-      std::vector<ft_detector::PnpResult> poses(result.armors.size());
-      for (std::size_t i = 0; i < result.armors.size(); ++i) {
-        poses[i].pose.id = result.armors[i].id;
-        poses[i].reason = pnp_enabled_ ? "awaiting_camera_info" : "disabled";
+      ft_detector::DetectionResult traditional, neural;
+      if (mode_ == "tradition" || compare_modes_) {
+        const auto start = Clock::now();
+        traditional = detector_->detect(shared_image->image);
+        traditional_sum_ms_ += elapsedMs(start);
+        ++traditional_frames_;
       }
-      std::string pnp_status = "disabled";
-      if (pnp_enabled_) {
-        pnp_status = "awaiting_camera_info";
-        if (calibration_ready) {
-          std::vector<const ft_detector::ArmorPose*> references(result.armors.size(), nullptr);
-          if (pose_continuity_enabled_)
-            references = pose_history_->references(result.armors, message->header.stamp.toSec());
-          for (std::size_t i = 0; i < result.armors.size(); ++i)
-            poses[i] = pnp_solver_->solve(result.armors[i], calibration_, references[i]);
-          // 求完整帧后再更新历史，避免前面返回的参考指针提前失效。
-          if (pose_continuity_enabled_)
-            pose_history_->store(result.armors, poses, message->header.stamp.toSec());
-          pnp_status = poses.empty() ? "no_candidates" : poses.front().reason;
-          if (std::any_of(poses.begin(), poses.end(), [](const ft_detector::PnpResult& pose) { return pose.valid; })) {
-            const bool provisional = std::any_of(poses.begin(), poses.end(),
-                [](const ft_detector::PnpResult& pose) { return pose.valid && pose.provisional; });
-            pnp_status = provisional ? "provisional" : "ready";
-          }
+      if (nn_detector_) {
+        auto detected = nn_detector_->detect(shared_image->image);
+        neural.armors = std::move(detected.decoded.armors);
+        nn_pre_sum_ms_ += detected.preprocess_ms;
+        nn_infer_sum_ms_ += detected.inference_ms;
+        nn_post_sum_ms_ += detected.decode_ms;
+        if (nn_frames_ == 0) {
+          ROS_INFO_STREAM("NN output float32 [1,21,6300], raw score range=[" << detected.decoded.min_score
+                          << "," << detected.decoded.max_score << "] candidates="
+                          << detected.decoded.threshold_pass << " kept=" << neural.armors.size());
         }
+        ++nn_frames_;
       }
-      if (!pnp_enabled_ || !pose_continuity_enabled_) pose_history_->reset();
+      const auto& result = mode_ == "tradition" ? traditional : neural;
+      const auto evaluation = estimatePoses(result.armors, message->header.stamp.toSec(), calibration_ready, true);
+      const auto& poses = evaluation.poses;
+      const auto& pnp_status = evaluation.status;
       const auto output = ft_detector::buildDetectionOutput(message->header, result.armors, poses, child_frame_prefix_);
       detection_publisher_.publish(output.frame);  // 包括 detections 为空的成功处理帧。
       if (publish_tf_ && !output.transforms.empty()) tf_broadcaster_.sendTransform(output.transforms);
       auto annotated = ft_detector::drawDetections(shared_image->image, result, debug_details_);
       ft_detector::drawPoses(annotated, poses, pnp_status, debug_details_);
+      labelMode(annotated, mode_);
       debug_publisher_.publish(cv_bridge::CvImage(
           message->header, sensor_msgs::image_encodings::BGR8, annotated).toImageMsg());
-      blue_mask_publisher_.publish(cv_bridge::CvImage(
-          message->header, sensor_msgs::image_encodings::MONO8, result.blue_mask).toImageMsg());
-      red_mask_publisher_.publish(cv_bridge::CvImage(
-          message->header, sensor_msgs::image_encodings::MONO8, result.red_mask).toImageMsg());
+      if (mode_ == "tradition" || compare_modes_) {
+        blue_mask_publisher_.publish(cv_bridge::CvImage(
+            message->header, sensor_msgs::image_encodings::MONO8, traditional.blue_mask).toImageMsg());
+        red_mask_publisher_.publish(cv_bridge::CvImage(
+            message->header, sensor_msgs::image_encodings::MONO8, traditional.red_mask).toImageMsg());
+      }
+      if (compare_modes_) {
+        const auto& alternative = mode_ == "tradition" ? neural : traditional;
+        const auto other_poses = estimatePoses(alternative.armors, message->header.stamp.toSec(), calibration_ready, false);
+        auto other = ft_detector::drawDetections(shared_image->image, alternative, debug_details_);
+        ft_detector::drawPoses(other, other_poses.poses, other_poses.status, debug_details_);
+        labelMode(other, mode_ == "tradition" ? "nn" : "tradition");
+        cv::Mat left, right, comparison;
+        const cv::Size size(std::max(1, static_cast<int>(std::lround(message->width * comparison_scale_))),
+                            std::max(1, static_cast<int>(std::lround(message->height * comparison_scale_))));
+        cv::resize(mode_ == "tradition" ? annotated : other, left, size);
+        cv::resize(mode_ == "tradition" ? other : annotated, right, size);
+        cv::hconcat(left, right, comparison);
+        comparison_publisher_.publish(cv_bridge::CvImage(
+            message->header, sensor_msgs::image_encodings::BGR8, comparison).toImageMsg());
+      }
       ++frame_count_;
+      frame_sum_ms_ += elapsedMs(frame_start);
       ROS_INFO_STREAM_THROTTLE(1.0, "Processed image " << frame_count_ << ": " << message->width
                                                      << "x" << message->height
                                                      << " lights=" << result.lights.size()
@@ -289,7 +419,8 @@ class DetectorNode {
                                                      << " published=" << output.frame.detections.size()
                                                      << " frame=" << message->header.frame_id
                                                      << " calibration="
-                                                     << (calibration_ready ? "ready" : "unavailable"));
+                                                     << (calibration_ready ? "ready" : "unavailable")
+                                                     << " " << timingSummary());
     } catch (const cv_bridge::Exception& error) {
       pose_history_->reset();
       ROS_ERROR_STREAM("Image conversion failed: " << error.what());
@@ -307,9 +438,18 @@ class DetectorNode {
   image_transport::ImageTransport image_transport_;
   image_transport::Publisher debug_publisher_;
   image_transport::Publisher blue_mask_publisher_, red_mask_publisher_;
+  image_transport::Publisher comparison_publisher_;
   ros::Publisher detection_publisher_;
   std::unique_ptr<ft_detector::TraditionalDetector> detector_;
   ft_detector::TraditionalParams traditional_params_;
+  std::unique_ptr<ft_detector::NnDetector> nn_detector_;
+  ft_detector::NnParams nn_params_;
+  std::string mode_, comparison_topic_;
+  bool compare_modes_ = false;
+  double comparison_scale_ = 0.5;
+  double traditional_sum_ms_ = 0.0, nn_pre_sum_ms_ = 0.0, nn_infer_sum_ms_ = 0.0,
+         nn_post_sum_ms_ = 0.0, frame_sum_ms_ = 0.0;
+  std::uint64_t traditional_frames_ = 0, nn_frames_ = 0;
   using TuningServer = dynamic_reconfigure::Server<ft_detector::DetectorConfig>;
   ft_detector::DetectorConfig active_tuning_;
   boost::recursive_mutex tuning_mutex_;
