@@ -6,6 +6,7 @@
   <arg name="rviz" default="false" />
   <arg name="reconfigure" default="false" />
   <arg name="tracker" default="true" />
+  <arg name="selector" default="false" />
   <arg name="use_sim_time" default="true" />
 
   <param name="/use_sim_time" value="$(arg use_sim_time)" />
@@ -17,6 +18,7 @@
   </include>
 
   <include if="$(arg tracker)" file="$(find ft_bringup)/launch/tracker.launch" />
+  <include if="$(arg selector)" file="$(find ft_bringup)/launch/selector.launch" />
 
   <include file="$(find ft_bringup)/launch/visualization.launch">
     <arg name="gui" value="$(arg gui)" />

@@ -1,0 +1,7 @@
+<launch>
+  <node pkg="ft_selector" type="ft_selector_node" name="ft_selector" output="screen" required="true">
+    <rosparam command="load" file="$(find ft_bringup)/config/selector.yaml" />
+    <!-- Use the same prediction horizon as the baseline tracker. -->
+    <rosparam command="load" file="$(find ft_bringup)/config/tracker.yaml" ns="linear" />
+  </node>
+</launch>

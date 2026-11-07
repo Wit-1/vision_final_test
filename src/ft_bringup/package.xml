@@ -8,6 +8,7 @@
   <buildtool_depend>catkin</buildtool_depend>
   <exec_depend>ft_detector</exec_depend>
   <exec_depend>ft_tracker</exec_depend>
+  <exec_depend>ft_selector</exec_depend>
   <exec_depend>roslaunch</exec_depend>
   <exec_depend>rosparam</exec_depend>
   <exec_depend>rosbag</exec_depend>

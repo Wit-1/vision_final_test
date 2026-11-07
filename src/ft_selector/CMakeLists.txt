@@ -1,0 +1,29 @@
+cmake_minimum_required(VERSION 3.0.2)
+project(ft_selector)
+
+find_package(catkin REQUIRED COMPONENTS roscpp ft_detection ft_msgs geometry_msgs std_msgs visualization_msgs)
+find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+catkin_package(
+  INCLUDE_DIRS include
+  LIBRARIES ft_selector_core
+  CATKIN_DEPENDS roscpp ft_detection ft_msgs geometry_msgs std_msgs visualization_msgs
+  DEPENDS EIGEN3
+)
+
+add_library(ft_selector_core src/rotating_tracker.cpp src/target_selector.cpp)
+target_compile_features(ft_selector_core PUBLIC cxx_std_17)
+target_compile_options(ft_selector_core PRIVATE -Wall -Wextra)
+target_include_directories(ft_selector_core PUBLIC include)
+target_link_libraries(ft_selector_core PUBLIC Eigen3::Eigen)
+
+add_executable(ft_selector_node src/selector_node.cpp)
+target_compile_options(ft_selector_node PRIVATE -Wall -Wextra)
+target_include_directories(ft_selector_node PRIVATE ${catkin_INCLUDE_DIRS})
+add_dependencies(ft_selector_node ${catkin_EXPORTED_TARGETS})
+target_link_libraries(ft_selector_node ft_selector_core ${catkin_LIBRARIES})
+
+install(TARGETS ft_selector_core ft_selector_node
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+install(DIRECTORY include/${PROJECT_NAME}/ DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION})

@@ -1,4 +1,4 @@
-# 视觉组最终考核：项目结构、逐步实施与提交计划
+# 视觉组最终考核：逐步实施与提交计划
 
 ## 1．目标与推进规则
 
@@ -6,7 +6,7 @@
 
 以下文件路径均相对项目根目录 `vision_final_test/`。
 
-本计划保存在项目根目录，说明项目结构、实施步骤及验收方式。目录蓝图包含尚待实现的后续模块。
+本计划说明实施步骤及验收方式。完整目录蓝图和文件用途见 docs/file_guide.md。
 
 推进方式：
 
@@ -18,152 +18,11 @@
 
 小步骤不单独 commit。理解确认与 commit 授权分别处理，不能相互代替。PLAN 只保留实施计划；项目学习问答保存在 docs/learning_log.md，关键 AI 辅助和本人项目决策保存在 ai_usage.md，提交历史由 Git 保存。
 
-`ai_usage.md`、`docs/learning_log.md` 和 `docs/file_index.md` 在开发期间保留本地，项目最终整理时统一提交。learning_log 只保留项目相关的实际学习问答及必要纠正；ai_usage 简要记录关键辅助内容和本人项目决策，不记录 AI 自行排错的过程。
+`ai_usage.md`、`docs/learning_log.md` 和 `docs/file_guide.md` 在开发期间保留本地，项目最终整理时统一提交。learning_log 只保留项目相关的实际学习问答及必要纠正；ai_usage 简要记录关键辅助内容和本人项目决策，不记录 AI 自行排错的过程。
 
 自动化验证文件按临时材料处理，不作为学习内容或提交内容；此前的测试源码、测试配置及构建注册一并清理。后续验证脚本放在 `/tmp`，验证结束后清理，必要的结果与限制保留在验收记录。本人只需学习实际功能代码、配置和运行方式。
 
-## 2．最终项目结构
-
-以下是最终目录蓝图，文件随对应任务逐步创建。
-
-```text
-vision_final_test/                     # 独立 Git 仓库、独立 catkin 工作空间
-├── PLAN.md                            # 项目结构、实施步骤与验收方式
-├── README.md                          # 项目入口：环境、构建、运行、参数、限制
-├── ai_usage.md                        # 关键 AI 辅助和本人项目决策
-├── .gitignore                         # 排除素材、依赖、缓存和生成结果
-├── run.sh                             # 环境检查、构建、启动、回放入口
-│
-├── task/                              # 已有原始素材，保留原件，不进入 Git
-│   ├── 视觉组最终考核.pdf
-│   ├── ft_detection.zip
-│   ├── nn_model.zip
-│   ├── blue_1.bag
-│   ├── blue_1_with_detection.bag
-│   ├── blue_guard.bag
-│   ├── blue_guard_with_detection.bag
-│   ├── red_1&3.bag
-│   ├── red_1&3_with_detection.bag
-│   ├── red_4.bag
-│   └── red_4_with_detection.bag
-│
-├── src/
-│   ├── ft_detection/                  # 素材提供的检测消息包，保留定义兼容
-│   │   ├── CMakeLists.txt
-│   │   ├── package.xml
-│   │   ├── README.md
-│   │   └── msg/
-│   │       ├── Detection.msg
-│   │       └── DetectionFrame.msg
-│   │
-│   ├── ft_msgs/                       # 自定义跟踪、目标消息
-│   │   └── msg/
-│   │       ├── Track.msg
-│   │       └── Target.msg
-│   │
-│   ├── ft_detector/                   # 图像接入、两种识别方式、PnP、检测输出
-│   │   ├── include/ft_detector/
-│   │   │   ├── armor_candidate.hpp    # 两种识别方式共用的内部候选类型
-│   │   │   ├── traditional_detector.hpp
-│   │   │   ├── pnp_solver.hpp
-│   │   │   ├── pose_history.hpp       # 上一帧位姿参考和唯一几何匹配
-│   │   │   ├── detection_output.hpp   # ROS 检测消息和 TF 的共同输出接口
-│   │   │   ├── tuning_parameters.hpp  # 算法参数与动态配置的转换
-│   │   │   ├── debug_draw.hpp
-│   │   │   └── nn_detector.hpp
-│   │   ├── src/
-│   │   │   ├── detector_node.cpp      # ROS 回调、CameraInfo、模式选择与发布
-│   │   │   ├── traditional_detector.cpp
-│   │   │   ├── pnp_solver.cpp
-│   │   │   ├── pose_history.cpp       # 双解消歧所用历史的匹配与失效清理
-│   │   │   ├── detection_output.cpp   # 字段检查、共享四元数与消息构造
-│   │   │   ├── tuning_parameters.cpp  # 保留静态字段、转换 21 项在线参数
-│   │   │   ├── debug_draw.cpp
-│   │   │   └── nn_detector.cpp
-│   │   └── cfg/
-│   │       └── Detector.cfg           # 在线调参字段、范围和默认值
-│   │
-│   ├── ft_tracker/                    # 单装甲板匀速跟踪
-│   │   ├── include/ft_tracker/
-│   │   │   └── linear_tracker.hpp
-│   │   └── src/
-│   │       ├── linear_tracker.cpp     # 滤波、关联、轨迹生命周期、提前量
-│   │       └── tracker_node.cpp       # ROS 输入输出、参数和跟踪 marker
-│   │
-│   ├── ft_selector/                   # 车体旋转估计与未来装甲板选择
-│   │   ├── include/ft_selector/
-│   │   │   ├── rotating_tracker.hpp
-│   │   │   └── target_selector.hpp
-│   │   └── src/
-│   │       ├── rotating_tracker.cpp   # 车体状态、旋转 EKF、换板关联
-│   │       ├── target_selector.cpp    # 未来可见性、选板和有效性
-│   │       └── selector_node.cpp      # ROS 输入输出及旋转对比 marker
-│   │
-│   └── ft_bringup/                    # 集中管理启动、参数和可视化
-│       ├── launch/
-│       │   ├── demo.launch           # 对外统一启动入口
-│       │   ├── detector.launch
-│       │   ├── tracker.launch
-│       │   ├── selector.launch
-│       │   └── visualization.launch
-│       ├── config/
-│       │   ├── detector.yaml         # 传统识别、几何、尺寸和队列参数
-│       │   ├── tracker.yaml          # Q/R、关联、丢失门限和 T
-│       │   ├── selector.yaml         # 旋转模型、关联和选板参数
-│       │   ├── model.yaml            # 模型路径、筛选和去重参数
-│       │   └── datasets/
-│       │       ├── blue_1.yaml
-│       │       ├── blue_guard.yaml
-│       │       ├── red_1_3.yaml
-│       │       └── red_4.yaml
-│       ├── scripts/
-│       │   ├── view_debug_image.sh    # 读取节点配置的调试图话题并启动 rqt
-│       │   ├── view_reconfigure.py    # 动态服务就绪后打开并选择调参窗口
-│       │   └── view_rviz.py           # 从 CameraInfo 自动选取 RViz 固定坐标系
-│       └── rviz/
-│           └── vision.rviz
-│
-├── tools/                            # 开发辅助工具，不参与在线算法
-│   ├── setup_inference.sh            # 安装本地 C++ 推理与模型准备依赖
-│   ├── prepare_model.py              # 原模型检查、节点排序、哈希记录
-│   └── summarize_timings.py          # 处理耗时数据，计算平均和 P95
-│
-├── docs/
-│   ├── file_index.md                 # 每个文件的用途和任务归属
-│   ├── design.md                     # 数据流、接口、坐标、尺寸和模型协议
-│   ├── learning_log.md               # 项目相关的实际学习问答及必要纠正
-│   └── acceptance.md                 # 原题第 1～10 点验收表和复现命令
-│
-├── assets/                           # 解压素材与派生模型，不进入 Git
-│   ├── models/
-│   └── samples/
-├── .deps/                            # 本地第三方依赖缓存，不进入 Git
-├── runs/                             # 日志、截图、计时 CSV，不进入 Git
-├── video/                            # 演示视频，单独交付
-├── dist/                             # 最终提交包，不进入 Git
-└── build/、devel/、install/、logs/、
-    .catkin_tools/                    # catkin 自动生成，不进入 Git
-```
-
-结构约定：
-
-- **每个 ROS 包均有自己的 `CMakeLists.txt` 和 `package.xml`**，树中除提供的消息包外省略重复展示。
-- `.hpp` 声明类型和接口，`.cpp` 实现算法；节点文件负责 ROS 通信和组织调用。
-- `ft_bringup` 管理配置与启动；检测、滤波和选板算法放在各自业务包内。
-- 两种检测方式返回相同的 `ArmorCandidate`，随后使用同一个 PnP 和消息发布流程。
-- 素材目录与解压后的运行资源分开，原件保持完整。
-- 正式文档和功能所需辅助工具随模块增长；每次创建时解释用途。自动验证材料临时使用后清理，不加入项目目录蓝图和学习安排。
-
-工作空间与环境约定：
-
-- 直接在本项目根目录构建，生成自己的 `build/` 和 `devel/`。
-- 在已配置的 Noetic 环境中构建，保持本项目与其他 catkin 工作空间独立。
-- `run.sh` 明确加载 Noetic 和本项目环境，避免父工作空间的自动 source 干扰。
-- 本项目使用独立 Git 仓库，按自身忽略规则管理素材和生成文件。
-- `run.sh` 提供入口，README 同时写明实际执行的命令，便于理解和排错。
-- README 等提交文档使用通用 Noetic 环境说明和项目相对路径，不依赖个人绝对路径或外层环境的专用启动脚本。
-
-## 3．任务点、学习步骤和文件归属
+## 2．任务点、学习步骤和文件归属
 
 基础执行顺序为 **1→2→3→4→6→5→7**。第 5 点包含跟踪参数，因此在第 6 点完成后集中验收；前面各点从实现开始就使用 YAML。
 
@@ -182,7 +41,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 
 第 1 点提前准备消息包，第 4 点完成对应发布行为；参数也会随所属算法一起加入，第 5 点负责完整检查与在线调参。文件可以跨模块更新，每次更新都记录对应题号。
 
-## 4．节点、接口与素材适配
+## 3．节点、接口与素材适配
 
 | 节点 | 输入 | 输出 |
 |---|---|---|
@@ -210,7 +69,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 - 旋转部分先使用配置半径的简化模型，在相机稳定片段验证，明确相机运动等失效情况。
 - 历史目标 TF 和参考检测不作为真值；完整验收由原始图像驱动自写检测链路。
 
-## 5．验证、文档和交付
+## 4．验证、文档和交付
 
 验证按三层进行：
 
@@ -220,7 +79,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 
 文档分工：
 
-- `file_index.md`：每个文件的用途、所属题号和调用位置。
+- `file_guide.md` 保存项目结构、文件用途和所属题号。
 - `design.md`：数据流、消息、坐标轴、四点尺寸、模型协议和运动假设。
 - `acceptance.md`：原题第 1～10 点的要求、操作、结果和提交记录。
 - `learning_log.md`：项目相关的实际学习问答、本人回答及必要纠正。

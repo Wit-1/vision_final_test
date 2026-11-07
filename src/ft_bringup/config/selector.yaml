@@ -1,0 +1,23 @@
+detection_topic: /ft/detection
+target_topic: /ft/target
+marker_topic: /ft/debug/selector
+queue_size: 5
+
+# Equal-height, equally spaced plates. The radius is a trial parameter in metres.
+radius_m: 0.25
+plate_count: 4
+association_position_m: 0.40
+association_yaw_rad: 0.70
+lost_timeout_s: 0.5
+
+linear_noise_density: 2.0      # m^2/s^3
+angular_noise_density: 10.0    # rad^2/s^3
+position_variance: 0.0025      # m^2
+yaw_variance: 0.04             # rad^2
+initial_velocity_variance: 4.0 # (m/s)^2
+initial_omega_variance: 25.0   # (rad/s)^2
+
+min_horizontal_normal: 0.5    # Reject normals with too little horizontal projection.
+min_facing_cosine: 0.20       # Minimum facing score for future plate selection.
+marker_size_m: 0.08
+marker_lifetime_s: 0.6

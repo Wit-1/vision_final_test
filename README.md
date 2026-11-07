@@ -1,6 +1,6 @@
 # 视觉组最终考核：装甲板自瞄感知链路
 
-基于 ROS Noetic、OpenCV 和 ONNX Runtime 的独立 catkin 工作空间，实现图像接入、传统/神经网络装甲板识别、PnP、跨帧选解、单板平移跟踪及可视化。后续任务见 [PLAN.md](PLAN.md)。
+基于 ROS Noetic、OpenCV 和 ONNX Runtime 的独立 catkin 工作空间，实现图像接入、传统/神经网络装甲板识别、PnP、单板平移跟踪、车体旋转估计和装甲板选择。后续任务见 [PLAN.md](PLAN.md)。
 
 ## 仓库结构
 
@@ -10,11 +10,12 @@
 vision_final_test/
 ├── src/
 │   ├── ft_detection/         # 素材提供的检测消息包
-│   ├── ft_msgs/              # 自定义 Track 消息
+│   ├── ft_msgs/              # 自定义 Track 和 Target 消息
 │   ├── ft_detector/          # 图像接入、两种识别、PnP、TF 和调参
 │   ├── ft_tracker/           # 单板匀速跟踪与提前量预测
+│   ├── ft_selector/          # 车体旋转 EKF 和未来选板
 │   └── ft_bringup/
-│       ├── config/           # 检测、跟踪和数据集参数
+│       ├── config/           # 检测、跟踪、选板和数据集参数
 │       ├── launch/           # 统一启动及各模块入口
 │       ├── scripts/          # 图像、RViz 和调参窗口启动器
 │       └── rviz/             # 三维显示配置
@@ -34,7 +35,7 @@ vision_final_test/
 
 ## 环境与构建
 
-环境：Ubuntu 20.04、ROS Noetic、OpenCV 4.2.0、catkin tools，以及 curl、Python pip/OpenCV/YAML。推理使用 ONNX Runtime 1.22.0 CPU C++ 包，神经网络库及节点使用 C++17，其余算法库使用 C++14。ROS 依赖见各包的 package.xml。
+环境为 Ubuntu 20.04、ROS Noetic、OpenCV 4.2.0、Eigen3、catkin tools，以及 curl、Python pip/OpenCV/YAML。推理使用 ONNX Runtime 1.22.0 CPU C++ 包。神经网络与旋转选板使用 C++17，其余算法库使用 C++14。ROS 依赖见各包的 package.xml。
 
 在项目根目录执行：
 
@@ -117,6 +118,8 @@ rosbag play --clock task/red_4.bag --topics /hk_camera/image_raw/compressed /hk_
 | `/ft/detection` | ft_detection/DetectionFrame，有效检测及带图像 header 的空检测帧 |
 | `/ft/track` | ft_msgs/Track，轨迹 ID、命中标志、位置、速度和提前量位置 |
 | `/ft/debug/marker` | 跟踪当前位置、未来位置和连线 |
+| `/ft/target` | ft_msgs/Target，车体 ID、有效标志、当前板和未来选中板的位置 |
+| `/ft/debug/selector` | 车体中心、当前板、未来板和同帧预测对照 |
 | `/ft/debug/image` | 框、角点 0～3、帧内 ID、颜色、大小、位姿轴及深度/重投影误差 |
 | `/ft/debug/mask/blue`、`/ft/debug/mask/red` | 蓝色、红色 HSV 掩膜 |
 | `/ft/debug/comparison` | compare_modes 开启时的同帧双模式对比图 |
@@ -137,6 +140,21 @@ rostopic echo --filter 'len(m.detections) > 0' -n 1 /ft/detection
 [tracker.yaml](src/ft_bringup/config/tracker.yaml) 配置六维匀速卡尔曼滤波：状态为位置和速度，dt 来自图像时间戳。Q 采用随 dt 积分的白加速度噪声，q=2 m²/s³；R 为 0.0025 m²（位置标准差 5 cm），关联距离门限为 0.5 m。
 
 首次选最近目标，之后在预测位置附近关联并保持锁定；漏检时 `tracking=false`，超过 0.5 s 删除。`id=0` 表示无轨迹，正 ID 表示已有轨迹；轨迹 ID 与帧内检测 ID 不同。`position_predict=position+T*velocity`，默认 T=0.1 s；模型、参数单位和已知限制见[设计说明](docs/design.md#单装甲板平移跟踪)。
+
+## 旋转预测与选板
+
+用两个终端启动选板并回放。
+
+```bash
+./run.sh launch dataset:=blue_guard mode:=nn selector:=true rviz:=true
+./run.sh play blue_guard -u 3 -r 0.15
+```
+
+RViz 的青色方块表示车体中心，紫色球是当前板，蓝色球是 T 秒后最朝向相机的板。橙色球仍为单板匀速预测。同一图像时间戳且两条链路都有有效观测时，灰线连接两种预测。选板半径、槽位数和门限在 [selector.yaml](src/ft_bringup/config/selector.yaml) 中设置，提前量沿用 [tracker.yaml](src/ft_bringup/config/tracker.yaml)。
+
+蓝球与紫球用于看提前选板，蓝球与橙球用于比较两种预测。判断预测偏差时，将同一帧发出的预测与 T 秒后的可见板对应。实际样例与模型限制见[验收记录](docs/acceptance.md#第-9-点旋转车体与装甲板选择)。
+
+短时漏检时 `valid=false`，保留车体 ID 并以半透明 marker 显示预测。失联超过 0.5 s 时清除车体 ID 和 marker。圆周模型的假设和关联规则见[设计说明](docs/design.md#旋转车体与装甲板选择)。
 
 ## 在线调参
 
@@ -175,3 +193,5 @@ rosrun rqt_reconfigure rqt_reconfigure
 | `4db06c4` | 完成检测消息发布、空检测帧和可视化输出对照。 |
 | `31abdf0` | 加入单板匀速跟踪、轨迹生命周期和提前量预测。 |
 | `e0d5eba` | 加入动态调参、参数校验和 YAML 默认值管理。 |
+| `00049fe` | 整理统一启动、使用说明和验收文档。 |
+| `ac69e0f` | 接入 ONNX Runtime 识别、同帧对比和推理计时。 |

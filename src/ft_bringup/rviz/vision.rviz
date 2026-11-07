@@ -21,6 +21,11 @@ Visualization Manager:
       Name: Tracking
       Marker Topic: /ft/debug/marker
       Queue Size: 100
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Name: Rotating target
+      Marker Topic: /ft/debug/selector
+      Queue Size: 100
   Global Options:
     Background Color: 32; 32; 32
     Frame Rate: 30
