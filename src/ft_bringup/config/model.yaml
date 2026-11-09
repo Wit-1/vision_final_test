@@ -1,7 +1,5 @@
-# These fields are shared by both modes; mode and compare_modes are launch arguments.
+# OpenCV processing threads; mode is selected by the launch argument.
 processing_threads: 2
-comparison_topic: /ft/debug/comparison
-comparison_scale: 0.5
 
 nn:
   # roslaunch expands the package path; no personal workspace path is required.

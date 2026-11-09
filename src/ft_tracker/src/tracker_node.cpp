@@ -12,8 +12,10 @@
 
 #include "ft_tracker/linear_tracker.hpp"
 
+// ROS 适配层负责读取配置和转换消息，匀速滤波交给 LinearTracker。
 class TrackerNode {
  public:
+  // 建立跟踪器，检查话题、队列和显示参数，再连接输入输出。
   TrackerNode() : private_nh_("~") {
     ft_tracker::TrackerParams params;
     params.process_noise_density = required<double>("process_noise_density");
@@ -26,6 +28,7 @@ class TrackerNode {
     params.match_color = required<bool>("match_color");
     params.match_size = required<bool>("match_size");
     tracker_.reset(new ft_tracker::LinearTracker(params));
+    // 算法配置与 ROS 通信配置分开读取，话题都来自 YAML。
     const auto input = required<std::string>("detection_topic");
     const auto output = required<std::string>("track_topic");
     const auto marker = required<std::string>("marker_topic");
@@ -38,6 +41,7 @@ class TrackerNode {
         marker_queue < 3 || !std::isfinite(marker_diameter_m_) || marker_diameter_m_ <= 0.0 ||
         !std::isfinite(marker_lifetime_s_) || marker_lifetime_s_ <= 0.0)
       throw std::invalid_argument("Tracker topics/queues and marker dimensions/lifetime are invalid");
+    // 一份检测帧触发一次跟踪更新，并发布状态与 marker。
     track_publisher_ = nh_.advertise<ft_msgs::Track>(output, output_queue);
     marker_publisher_ = nh_.advertise<visualization_msgs::Marker>(marker, marker_queue);
     subscriber_ = nh_.subscribe(input, input_queue, &TrackerNode::receive, this);
@@ -45,6 +49,7 @@ class TrackerNode {
   }
 
  private:
+  // 必需参数没有隐藏默认值，错误配置在启动时报告。
   template <typename T> T required(const std::string& name) const {
     T value;
     if (!private_nh_.getParam(name, value))
@@ -52,12 +57,14 @@ class TrackerNode {
     return value;
   }
 
+  // 显示当前点、未来点和连线；无轨迹时发送 DELETE 清除旧标记。
   void publishMarkers(const ft_msgs::Track& track) {
     if (track.header.frame_id.empty()) return;
     for (int id = 0; id < 3; ++id) {
       visualization_msgs::Marker marker;
       marker.header = track.header;
       marker.ns = "ft_tracker";
+      // marker ID 区分三种显示对象，Track.id 才是跨帧轨迹身份。
       marker.id = id;
       marker.action = track.id == 0 ? visualization_msgs::Marker::DELETE : visualization_msgs::Marker::ADD;
       marker.type = id == 2 ? visualization_msgs::Marker::LINE_STRIP : visualization_msgs::Marker::SPHERE;
@@ -67,6 +74,7 @@ class TrackerNode {
       marker.color.r = id == 0 ? 0.1 : 1.0;
       marker.color.g = id == 0 ? 1.0 : 0.5;
       marker.color.b = 0.1;
+      // 连线使用 points，球使用 pose.position；纯预测时统一变淡。
       if (id == 2) {
         marker.scale.x = marker_diameter_m_ * 0.15;
         marker.points = {track.position, track.position_predict};
@@ -78,7 +86,9 @@ class TrackerNode {
     }
   }
 
+  // 接收检测帧，将观测送入滤波器，并沿用图像 header 发布 Track。
   void receive(const ft_detection::DetectionFrameConstPtr& message) {
+    // 换坐标系时重置滤波；帧名丢失时还需清除旧系中的 marker。
     if (message->header.frame_id != frame_) {
       if (message->header.frame_id.empty() && !frame_.empty()) {
         ft_msgs::Track cleared;
@@ -96,6 +106,7 @@ class TrackerNode {
         tracker_->reset();
         ROS_WARN_THROTTLE(1.0, "Detection frame has no camera frame_id; track cleared");
       } else {
+        // 将 ROS 检测转换为位置与属性观测，帧内 ID 仅用于稳定排序。
         std::vector<ft_tracker::Observation> observations;
         observations.reserve(message->detections.size());
         for (const auto& detection : message->detections) {
@@ -107,6 +118,7 @@ class TrackerNode {
           observation.position = {p.x, p.y, p.z};
           observations.push_back(observation);
         }
+        // 即使观测为空也按图像时间更新，推进预测与超时删除。
         const auto state = tracker_->update(message->header.stamp.toSec(), observations);
         output.id = state.id;
         output.tracking = state.tracking;
@@ -117,6 +129,7 @@ class TrackerNode {
         output.position_predict.z = state.position_predict[2];
       }
     } catch (const std::exception& error) {
+      // 滤波异常清理内部轨迹，本帧仍发布默认的无轨迹状态。
       tracker_->reset();
       ROS_ERROR_STREAM("Tracking failed; track cleared: " << error.what());
     }
@@ -124,6 +137,7 @@ class TrackerNode {
     publishMarkers(output);
   }
 
+  // 回调之间持续保存通信对象、滤波器和当前相机坐标系名称。
   ros::NodeHandle nh_, private_nh_;
   ros::Subscriber subscriber_;
   ros::Publisher track_publisher_, marker_publisher_;
@@ -132,6 +146,7 @@ class TrackerNode {
   double marker_diameter_m_, marker_lifetime_s_;
 };
 
+// 注册跟踪节点并进入 ROS 回调循环。
 int main(int argc, char** argv) {
   ros::init(argc, argv, "ft_tracker");
   try {

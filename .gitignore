@@ -15,6 +15,9 @@
 /video/
 /dist/
 
+# Local verification notes, kept outside future commits.
+/docs/acceptance.md
+
 # Recorded data and Python caches, wherever they are generated.
 *.bag
 *.bag.active

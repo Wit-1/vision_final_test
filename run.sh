@@ -12,7 +12,12 @@ usage() {
   ./run.sh setup-inference
   ./run.sh prepare-model
   ./run.sh build [软件包名或 catkin build 参数]
-  ./run.sh launch [dataset:=blue_1] [mode:=tradition|nn] [compare_modes:=false] [gui:=true] [rviz:=false] [reconfigure:=false] [tracker:=true]
+  ./run.sh build-tools
+  ./run.sh benchmark [--dataset blue_1] [--mode tradition|nn] [--start 0] [--duration 1]
+  ./run.sh compare [dataset:=blue_1] [mode:=nn] [gui:=true] [rviz:=true]
+  ./run.sh launch [dataset:=blue_1] [mode:=tradition|nn]
+                  [tracker:=true] [selector:=true] [use_sim_time:=true]
+                  [gui:=true] [rviz:=false] [reconfigure:=false]
   ./run.sh play <blue_1|blue_guard|red_1_3|red_4> [rosbag play 参数]
 
 示例（两个终端使用同一数据集）：
@@ -23,7 +28,7 @@ USAGE
 
 case "$command_name" in
     help|-h|--help) usage; exit 0 ;;
-    check|setup-inference|prepare-model|build|launch|play) ;;
+    check|setup-inference|prepare-model|build|build-tools|benchmark|compare|launch|play) ;;
     *) usage >&2; exit 2 ;;
 esac
 
@@ -56,8 +61,8 @@ import rospkg
 
 packages = ["roscpp", "rospy", "sensor_msgs", "cv_bridge", "image_transport",
             "compressed_image_transport", "message_generation", "message_runtime",
-            "rosbag", "roslaunch", "rqt_image_view", "rqt_reconfigure", "dynamic_reconfigure",
-            "tf2", "tf2_ros", "rviz", "visualization_msgs"]
+            "rosbag", "roslaunch", "rqt_image_view", "rqt_reconfigure", "rqt_graph", "dynamic_reconfigure",
+            "tf2", "tf2_ros", "rviz", "visualization_msgs", "message_filters"]
 rospack = rospkg.RosPack()
 for name in packages:
     rospack.get_path(name)
@@ -96,6 +101,23 @@ PY
     launch)
         load_workspace
         exec roslaunch ft_bringup demo.launch "$@"
+        ;;
+    build-tools)
+        load_workspace
+        cmake -S "$project_root/tools" -B "$project_root/build/tools" -DCMAKE_BUILD_TYPE=RelWithDebInfo
+        exec cmake --build "$project_root/build/tools" --parallel 2
+        ;;
+    benchmark)
+        load_workspace
+        if [ ! -x "$project_root/build/tools/benchmark_pipeline" ]; then
+            echo '请先运行 ./run.sh build-tools。' >&2
+            exit 1
+        fi
+        exec "$project_root/build/tools/benchmark_pipeline" --project "$project_root" "$@"
+        ;;
+    compare)
+        load_workspace
+        exec roslaunch "$project_root/tools/comparison.launch" "$@"
         ;;
     play)
         if [ "$#" -lt 1 ]; then usage >&2; exit 2; fi

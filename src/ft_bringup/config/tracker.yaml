@@ -6,7 +6,7 @@ track_queue_size: 1
 marker_queue_size: 10
 
 # Initial trial values, not calibrated against ground truth.
-# White acceleration spectral density q; Q uses the actual image dt (see docs/design.md).
+# White acceleration spectral density q; Q uses the actual image dt (see README.md, task 6).
 process_noise_density: 2.0           # m^2/s^3
 measurement_noise_variance: 0.0025  # m^2; standard deviation 0.05 m
 initial_position_variance: 0.01     # m^2

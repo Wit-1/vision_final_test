@@ -2,10 +2,8 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <fstream>
-#include <limits>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
@@ -15,15 +13,13 @@
 
 namespace ft_detector {
 namespace {
-using Clock = std::chrono::steady_clock;
+// 固定模型输出协议；筛选门限和运行线程数仍从配置读取。
 constexpr int kChannels = 21, kCandidates = 6300;
 
-double milliseconds(Clock::time_point first, Clock::time_point last) {
-  return std::chrono::duration<double, std::milli>(last - first).count();
-}
-
+// 模型已输出分数，检查合法区间，不再额外执行 sigmoid。
 bool unitScore(double value) { return std::isfinite(value) && value >= 0.0 && value <= 1.0; }
 
+// 用四角点的外接矩形近似候选范围，供 NMS 比较重叠。
 cv::Rect2f bounds(const ArmorCandidate& armor) {
   float left = armor.corners[0].x, right = left, top = armor.corners[0].y, bottom = top;
   for (const auto& point : armor.corners) {
@@ -33,17 +29,20 @@ cv::Rect2f bounds(const ArmorCandidate& armor) {
   return {left, top, right - left, bottom - top};
 }
 
+// 计算两个外接矩形的交并比。
 double iou(const cv::Rect2f& first, const cv::Rect2f& second) {
   const double intersection = (first & second).area();
   return intersection / (first.area() + second.area() - intersection);
 }
 }  // namespace
 
+// 先减补边，再除实际缩放比例，将模型画布坐标还原到原图。
 cv::Point2f LetterboxTransform::toOriginal(const cv::Point2f& point) const {
   return {static_cast<float>((point.x - left) / scale_x),
           static_cast<float>((point.y - top) / scale_y)};
 }
 
+// 校验固定输入协议、几何门限、线程数和四项动态阈值。
 void NnDetector::validateParams(const NnParams& params) {
   const auto& thresholds = params.thresholds;
   if (params.model_path.empty() || params.input_width != 640 || params.input_height != 480 ||
@@ -58,12 +57,14 @@ void NnDetector::validateParams(const NnParams& params) {
   }
 }
 
+// 将 BGR 原图变为 RGB、归一化的 NCHW 张量，同时保存坐标反变换。
 NnInput prepareNnInput(const cv::Mat& bgr, const NnParams& params) {
   if (bgr.empty() || bgr.type() != CV_8UC3)
     throw std::invalid_argument("Neural detector expects a non-empty CV_8UC3 image");
   NnInput input;
   auto& transform = input.transform;
   transform.original_size = bgr.size();
+  // 等比例缩放并居中补边，使用取整后的尺寸记录实际横纵比例。
   const double scale = std::min(static_cast<double>(params.input_width) / bgr.cols,
                                 static_cast<double>(params.input_height) / bgr.rows);
   transform.resized_size = {std::max(1, static_cast<int>(std::lround(bgr.cols * scale))),
@@ -79,6 +80,7 @@ NnInput prepareNnInput(const cv::Mat& bgr, const NnParams& params) {
       params.input_height - resized.rows - transform.top, transform.left,
       params.input_width - resized.cols - transform.left, cv::BORDER_CONSTANT,
       cv::Scalar::all(params.pad_value));
+  // 调整通道顺序和数值范围，再把三层像素写入连续张量。
   cv::cvtColor(canvas, rgb, cv::COLOR_BGR2RGB);
   rgb.convertTo(normalized, CV_32F, 1.0 / 255.0);
   const int shape[] = {1, 3, params.input_height, params.input_width};
@@ -91,25 +93,24 @@ NnInput prepareNnInput(const cv::Mat& bgr, const NnParams& params) {
   return input;
 }
 
-NnDecoded decodeNnOutput(const float* values, std::size_t count,
+// 解码分数与四点，执行几何筛选和 NMS，返回共用装甲板候选。
+std::vector<ArmorCandidate> decodeNnOutput(const float* values, std::size_t count,
                         const LetterboxTransform& transform, const NnParams& params) {
   if (!values || count != kChannels * kCandidates || transform.original_size.empty() ||
       !std::isfinite(transform.scale_x) || !std::isfinite(transform.scale_y) ||
       transform.scale_x <= 0.0 || transform.scale_y <= 0.0)
     throw std::invalid_argument("Unexpected neural output shape or resize transform");
+  // 输出按通道连续存储，通过 channel×6300+candidate 访问。
   const auto score = [values](int channel, int candidate) { return values[channel * kCandidates + candidate]; };
-  NnDecoded result;
-  result.min_score = std::numeric_limits<float>::infinity();
-  result.max_score = -std::numeric_limits<float>::infinity();
+  std::vector<ArmorCandidate> armors;
   for (int candidate = 0; candidate < kCandidates; ++candidate) {
     bool valid_scores = true;
     for (int channel = 0; channel < 13; ++channel) {
       const float value = score(channel, candidate);
       if (!unitScore(value)) { valid_scores = false; break; }
-      result.min_score = std::min(result.min_score, value);
-      result.max_score = std::max(result.max_score, value);
     }
     if (!valid_scores) continue;
+    // 颜色和编号分别取最高分；熄灭或其他颜色胜出时直接拒绝。
     int color = 0, number = 0;
     for (int channel = 1; channel < 4; ++channel)
       if (score(channel, candidate) > score(color, candidate)) color = channel;
@@ -119,6 +120,7 @@ NnDecoded decodeNnOutput(const float* values, std::size_t count,
     const double confidence = color_score * number_score;
     if (color > 1 || color_score < params.thresholds.color_score ||
         number_score < params.thresholds.number_score || confidence < params.thresholds.confidence) continue;
+    // 重排为共用点序，并在反变换后检查原图边界。
     ArmorCandidate armor;
     armor.id = candidate;  // Deterministic tie-break only; replaced by frame-local IDs after NMS.
     armor.is_red = color == 1;
@@ -135,55 +137,59 @@ NnDecoded decodeNnOutput(const float* values, std::size_t count,
           p.x >= transform.original_size.width || p.y >= transform.original_size.height) valid_points = false;
     }
     if (!valid_points) continue;
+    // 去掉非凸、过小或边长不足的四边形。
     const std::vector<cv::Point2f> points(armor.corners.begin(), armor.corners.end());
     if (!cv::isContourConvex(points) || cv::contourArea(points, true) < params.min_quad_area_px2) continue;
     for (int point = 0; point < 4; ++point)
       if (cv::norm(armor.corners[point] - armor.corners[(point + 1) % 4]) < params.min_edge_length_px)
         valid_points = false;
     if (!valid_points) continue;
+    // 模型没有大小输出，沿用灯条间距与长度之比判别板型。
     const auto left = (armor.corners[0] + armor.corners[3]) * 0.5F;
     const auto right = (armor.corners[1] + armor.corners[2]) * 0.5F;
     const double mean_length = (cv::norm(armor.corners[0] - armor.corners[3]) +
                                 cv::norm(armor.corners[1] - armor.corners[2])) * 0.5;
     armor.is_large_armor = cv::norm(left - right) / mean_length >= params.large_armor_min_spacing_ratio;
     armor.center = (left + right) * 0.5F;
-    result.armors.push_back(armor);
+    armors.push_back(armor);
   }
-  result.threshold_pass = result.armors.size();
-  std::sort(result.armors.begin(), result.armors.end(), [](const ArmorCandidate& a, const ArmorCandidate& b) {
+  // 按置信度排序并限制数量，再保留不与高分项过度重叠的候选。
+  std::sort(armors.begin(), armors.end(), [](const ArmorCandidate& a, const ArmorCandidate& b) {
     return a.confidence != b.confidence ? a.confidence > b.confidence : a.id < b.id;
   });
-  if (result.armors.size() > static_cast<std::size_t>(params.max_candidates))
-    result.armors.resize(params.max_candidates);
+  if (armors.size() > static_cast<std::size_t>(params.max_candidates))
+    armors.resize(params.max_candidates);
   std::vector<ArmorCandidate> kept;
-  for (const auto& candidate : result.armors) {
+  for (const auto& candidate : armors) {
     const auto box = bounds(candidate);
     const bool overlap = std::any_of(kept.begin(), kept.end(), [&](const ArmorCandidate& prior) {
       return iou(box, bounds(prior)) > params.thresholds.nms_iou;
     });
     if (!overlap) kept.push_back(candidate);
   }
+  // 最终按原图位置排序，重新分配仅在本帧有效的 ID。
   std::sort(kept.begin(), kept.end(), [](const ArmorCandidate& a, const ArmorCandidate& b) {
     return std::tie(a.center.x, a.center.y) < std::tie(b.center.x, b.center.y);
   });
   for (std::size_t index = 0; index < kept.size(); ++index) kept[index].id = index;
-  result.armors = std::move(kept);
-  if (!std::isfinite(result.min_score)) result.min_score = result.max_score = 0.0F;
-  return result;
+  return kept;
 }
 
+// 将 ONNX Runtime 资源封装在实现文件中，头文件只暴露检测接口。
 struct NnDetector::Impl {
   Ort::Env environment{ORT_LOGGING_LEVEL_WARNING, "ft_nn"};
   Ort::SessionOptions options;
   Ort::Session session{nullptr};
   Ort::MemoryInfo memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
+  // 启动时只创建一次 Session，并核对输入输出名称、类型与形状。
   explicit Impl(const NnParams& params) {
     options.SetIntraOpNumThreads(params.cpu_threads);
     options.SetInterOpNumThreads(1);
     options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
     options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
     session = Ort::Session(environment, params.model_path.c_str(), options);
+    // 不兼容的模型在启动阶段报错，避免逐帧按错误协议读取内存。
     if (session.GetInputCount() != 1 || session.GetOutputCount() != 1)
       throw std::invalid_argument("Expected one model input and one output");
     Ort::AllocatorWithDefaultOptions allocator;
@@ -202,6 +208,7 @@ struct NnDetector::Impl {
   }
 };
 
+// 检查参数及模型文件，再建立长期复用的推理资源。
 NnDetector::NnDetector(const NnParams& params) : params_(params) {
   validateParams(params_);
   if (!std::ifstream(params_.model_path).good())
@@ -209,8 +216,10 @@ NnDetector::NnDetector(const NnParams& params) : params_(params) {
   impl_.reset(new Impl(params_));
 }
 
+// 在 Impl 类型完整的实现文件中释放推理资源。
 NnDetector::~NnDetector() = default;
 
+// 校验新阈值后更新筛选配置，无需重新加载模型。
 void NnDetector::setThresholds(const NnThresholds& thresholds) {
   auto next = params_;
   next.thresholds = thresholds;
@@ -218,29 +227,24 @@ void NnDetector::setThresholds(const NnThresholds& thresholds) {
   params_.thresholds = thresholds;
 }
 
-NnResult NnDetector::detect(const cv::Mat& bgr) {
-  const auto start = Clock::now();
+// 单帧推理入口：预处理、运行 Session、检查输出并解码候选。
+std::vector<ArmorCandidate> NnDetector::detect(const cv::Mat& bgr) {
   auto input = prepareNnInput(bgr, params_);
-  const auto prepared = Clock::now();
   const std::array<int64_t, 4> shape{{1, 3, params_.input_height, params_.input_width}};
   auto tensor = Ort::Value::CreateTensor<float>(impl_->memory, input.blob.ptr<float>(), input.blob.total(),
                                                shape.data(), shape.size());
   const char* names_in[] = {"images"};
   const char* names_out[] = {"output0"};
+  // 张量借用本帧 blob 内存，该内存在同步推理返回前保持有效。
   auto outputs = impl_->session.Run(Ort::RunOptions{nullptr}, names_in, &tensor, 1, names_out, 1);
-  const auto inferred = Clock::now();
   const auto info = outputs.front().GetTensorTypeAndShapeInfo();
   if (info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
       info.GetShape() != std::vector<int64_t>({1, kChannels, kCandidates}))
     throw std::runtime_error("Runtime output differs from model protocol");
-  NnResult result;
-  result.decoded = decodeNnOutput(outputs.front().GetTensorData<float>(), info.GetElementCount(), input.transform, params_);
-  result.preprocess_ms = milliseconds(start, prepared);
-  result.inference_ms = milliseconds(prepared, inferred);
-  result.decode_ms = milliseconds(inferred, Clock::now());
-  return result;
+  return decodeNnOutput(outputs.front().GetTensorData<float>(), info.GetElementCount(), input.transform, params_);
 }
 
+// 向日志和独立工具提供实际使用的推理后端版本。
 std::string NnDetector::backendVersion() { return OrtGetApiBase()->GetVersionString(); }
 
 }  // namespace ft_detector

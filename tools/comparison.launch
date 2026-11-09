@@ -1,0 +1,47 @@
+<launch>
+  <arg name="dataset" default="blue_1" />
+  <arg name="mode" default="nn" />
+  <arg name="gui" default="true" />
+  <arg name="rviz" default="true" />
+  <arg name="reconfigure" default="false" />
+  <arg name="use_sim_time" default="true" />
+
+  <include file="$(find ft_bringup)/launch/demo.launch">
+    <arg name="dataset" value="$(arg dataset)" />
+    <arg name="mode" value="$(arg mode)" />
+    <arg name="gui" value="$(arg gui)" />
+    <arg name="rviz" value="$(arg rviz)" />
+    <arg name="reconfigure" value="$(arg reconfigure)" />
+    <arg name="use_sim_time" value="$(arg use_sim_time)" />
+  </include>
+
+  <!-- The other detector only supplies comparison images. Its detections and TF are isolated. -->
+  <group ns="ft_comparison">
+    <remap from="/ft/detection" to="/ft/compare/other/detection" />
+    <remap from="/ft/debug/image" to="/ft/compare/other/image" />
+    <remap from="/ft/debug/mask/blue" to="/ft/compare/other/mask/blue" />
+    <remap from="/ft/debug/mask/red" to="/ft/compare/other/mask/red" />
+    <include file="$(find ft_bringup)/launch/detector.launch">
+      <arg name="dataset" value="$(arg dataset)" />
+      <arg name="mode" value="$(eval 'tradition' if arg('mode') == 'nn' else 'nn')" />
+    </include>
+    <param name="ft_detector/pnp/publish_tf" value="false" />
+  </group>
+
+  <node pkg="ft_bringup" type="compare_detections.py" name="compare_detections" output="screen" required="true">
+    <param name="traditional_topic" value="$(eval '/ft/debug/image' if arg('mode') == 'tradition' else '/ft/compare/other/image')" />
+    <param name="neural_topic" value="$(eval '/ft/debug/image' if arg('mode') == 'nn' else '/ft/compare/other/image')" />
+    <param name="output_topic" value="/ft/debug/comparison" />
+    <param name="scale" value="0.5" />
+    <param name="queue_size" value="20" />
+  </node>
+
+  <node pkg="ft_bringup" type="compare_predictions.py" name="compare_predictions" output="screen" required="true">
+    <rosparam command="load" file="$(find ft_bringup)/config/tracker.yaml" ns="linear" />
+    <rosparam command="load" file="$(find ft_bringup)/config/selector.yaml" ns="rotating" />
+    <param name="output_topic" value="/ft/debug/prediction_comparison" />
+    <param name="queue_size" value="20" />
+    <param name="line_width_m" value="0.01" />
+    <param name="lifetime_s" value="0.6" />
+  </node>
+</launch>

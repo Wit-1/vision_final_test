@@ -2,6 +2,7 @@
 
 namespace ft_detector {
 
+// 将算法参数中的传统在线字段转换为 dynamic_reconfigure 配置。
 DetectorConfig tuningFromParams(const TraditionalParams& params) {
   auto config = DetectorConfig::__getDefault__();
   config.blue_h_min = params.blue.h_min; config.blue_h_max = params.blue.h_max;
@@ -19,6 +20,7 @@ DetectorConfig tuningFromParams(const TraditionalParams& params) {
   return config;
 }
 
+// 复制当前完整参数再覆盖在线字段，保留 YAML 中的其他几何设置。
 TraditionalParams paramsWithTuning(const TraditionalParams& current, const DetectorConfig& config) {
   auto params = current;
   params.blue = {config.blue_h_min, config.blue_h_max, config.blue_s_min,

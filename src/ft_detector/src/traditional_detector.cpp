@@ -13,6 +13,7 @@
 namespace ft_detector {
 namespace {
 
+// 校验 OpenCV HSV 的取值范围和上下限关系。
 void validateHsv(const HsvRange& range) {
   if (range.h_min < 0 || range.h_max > 179 || range.h_min > range.h_max ||
       range.s_min < 0 || range.s_max > 255 || range.s_min > range.s_max ||
@@ -21,6 +22,7 @@ void validateHsv(const HsvRange& range) {
   }
 }
 
+// 按一组 HSV 阈值生成二值掩膜，白色表示通过颜色筛选。
 cv::Mat segment(const cv::Mat& hsv, const HsvRange& range) {
   cv::Mat mask;
   cv::inRange(hsv, cv::Scalar(range.h_min, range.s_min, range.v_min),
@@ -28,6 +30,7 @@ cv::Mat segment(const cv::Mat& hsv, const HsvRange& range) {
   return mask;
 }
 
+// 判断两组配对是否使用了同一根灯条，用于消除共享冲突。
 bool sharesLight(const PairDecision& first, const PairDecision& second) {
   return first.left == second.left || first.left == second.right ||
          first.right == second.left || first.right == second.right;
@@ -35,18 +38,22 @@ bool sharesLight(const PairDecision& first, const PairDecision& second) {
 
 }  // namespace
 
+// 无向灯条每转 180 度等价，将角度统一到 [-90, 90)。
 double normalizeLightAngle(double angle_deg) {
   double value = std::fmod(angle_deg + 90.0, 180.0);
   if (value < 0.0) value += 180.0;
   return value - 90.0;
 }
 
+// 在统一的角度周期内计算差值，避免边界附近误判成大角差。
 double lightAngleDifference(double first_deg, double second_deg) {
   return std::abs(normalizeLightAngle(first_deg - second_deg));
 }
 
+// 构造时复用参数校验，保证首帧使用合法阈值。
 TraditionalDetector::TraditionalDetector(const TraditionalParams& params) { setParams(params); }
 
+// 完整校验颜色与几何参数，全部通过后才替换当前配置。
 void TraditionalDetector::setParams(const TraditionalParams& params) {
   validateHsv(params.blue);
   validateHsv(params.red_low);
@@ -76,10 +83,12 @@ void TraditionalDetector::setParams(const TraditionalParams& params) {
   params_ = params;
 }
 
+// 一帧检测入口：颜色分割、灯条筛选，再配对为装甲板候选。
 DetectionResult TraditionalDetector::detect(const cv::Mat& bgr) const {
   if (bgr.empty() || bgr.type() != CV_8UC3) {
     throw std::invalid_argument("TraditionalDetector expects a non-empty CV_8UC3 BGR image");
   }
+  // 蓝色用单区间，红色合并色环两端的区间。
   cv::Mat hsv;
   cv::cvtColor(bgr, hsv, cv::COLOR_BGR2HSV);
   DetectionResult result;
@@ -88,6 +97,7 @@ DetectionResult TraditionalDetector::detect(const cv::Mat& bgr) const {
   // 不做闭运算补断条：不把遮挡后的两段强行接成完整灯条。
   findLights(result.blue_mask, false, result);
   findLights(result.red_mask, true, result);
+  // 先按图像位置排序，使后续左右配对的顺序稳定。
   std::sort(result.lights.begin(), result.lights.end(), [](const LightBar& a, const LightBar& b) {
     return std::tie(a.center.x, a.center.y, a.is_red) < std::tie(b.center.x, b.center.y, b.is_red);
   });
@@ -95,10 +105,12 @@ DetectionResult TraditionalDetector::detect(const cv::Mat& bgr) const {
   return result;
 }
 
+// 从外轮廓提取灯条，保存通过项及拒绝原因供调试图使用。
 void TraditionalDetector::findLights(const cv::Mat& mask, bool is_red, DetectionResult& result) const {
   std::vector<std::vector<cv::Point>> contours;
   cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
   for (const auto& contour : contours) {
+    // 最小外接矩形提供长轴、长度与宽度，轮廓面积用于计算填充率。
     const auto rectangle = cv::minAreaRect(contour);
     const double area = cv::contourArea(contour);
     cv::Point2f vertices[4];
@@ -108,6 +120,7 @@ void TraditionalDetector::findLights(const cv::Mat& mask, bool is_red, Detection
     if (cv::norm(adjacent) > cv::norm(direction)) direction = adjacent;
     const double length = cv::norm(direction);
     const double width = std::min(rectangle.size.width, rectangle.size.height);
+    // 先筛掉过小、过短、形状不符或填充不足的轮廓。
     std::string reason;
     if (area < params_.min_contour_area) reason = "area";
     else if (length < params_.min_light_length || width <= 0.0) reason = "length";
@@ -119,11 +132,13 @@ void TraditionalDetector::findLights(const cv::Mat& mask, bool is_red, Detection
       continue;
     }
 
+    // 统一长轴向下，确保 top/bottom 不会因矩形方向反转而交换。
     direction *= static_cast<float>(1.0 / length);
     if (direction.y < 0.0F || (direction.y == 0.0F && direction.x < 0.0F)) direction *= -1.0F;
     // 从长边向量计算角度，不依赖 RotatedRect::angle 的版本约定。
     const double angle = normalizeLightAngle(std::atan2(direction.x, direction.y) * 180.0 / CV_PI);
     if (std::abs(angle) > params_.max_light_tilt_deg) reason = "tilt";
+    // 靠近图像边缘的轮廓可能被截断，拒绝用它拼接装甲板。
     for (const auto& point : vertices) {
       if (point.x <= params_.border_margin || point.y <= params_.border_margin ||
           point.x >= mask.cols - 1 - params_.border_margin ||
@@ -133,6 +148,7 @@ void TraditionalDetector::findLights(const cv::Mat& mask, bool is_red, Detection
       result.rejected_lights.push_back({rectangle, reason});
       continue;
     }
+    // 用中心沿长轴各走半长，得到灯条的上下端点。
     LightBar light;
     light.rectangle = rectangle;
     light.center = rectangle.center;
@@ -146,18 +162,21 @@ void TraditionalDetector::findLights(const cv::Mat& mask, bool is_red, Detection
   }
 }
 
+// 枚举灯条对，通过几何检查和冲突处理后生成四点候选。
 void TraditionalDetector::pairLights(DetectionResult& result) const {
   for (std::size_t i = 0; i < result.lights.size(); ++i) {
     for (std::size_t j = i + 1; j < result.lights.size(); ++j) {
       const auto& left = result.lights[i];
       const auto& right = result.lights[j];
       PairDecision pair{i, j, 0.0, 0.0, ""};
+      // 距离除以平均灯条长度，减少远近尺度对配对阈值的影响。
       const double mean_length = (left.length + right.length) / 2.0;
       const double length_ratio = std::min(left.length, right.length) / std::max(left.length, right.length);
       const double angle_diff = lightAngleDifference(left.angle_deg, right.angle_deg);
       const double dy_ratio = std::abs(left.center.y - right.center.y) / mean_length;
       pair.spacing_ratio = cv::norm(right.center - left.center) / mean_length;
       pair.cost = (1.0 - length_ratio) + dy_ratio + angle_diff / params_.max_pair_angle_deg;
+      // 按颜色、顺序、长度比、角差、高差和间距逐项门控。
       if (left.is_red != right.is_red) pair.reason = "color";
       else if (right.center.x <= left.center.x) pair.reason = "order";
       else if (length_ratio < params_.min_pair_length_ratio) pair.reason = "length_ratio";
@@ -195,6 +214,7 @@ void TraditionalDetector::pairLights(DetectionResult& result) const {
     best[pair.left] = std::min(best[pair.left], pair.cost);
     best[pair.right] = std::min(best[pair.right], pair.cost);
   }
+  // 只要任意一端有明显更优配对就拒绝本组；代价相近则保守放弃。
   for (const auto index : eligible) {
     auto& pair = result.pairs[index];
     if (pair.cost > best[pair.left] + params_.pair_ambiguity_margin ||
@@ -210,6 +230,7 @@ void TraditionalDetector::pairLights(DetectionResult& result) const {
       pair.reason = "ambiguous";
       continue;
     }
+    // 用归一化间距区分大小板，并固定输出左上、右上、右下、左下。
     pair.reason = "accepted";
     const auto& left = result.lights[pair.left];
     const auto& right = result.lights[pair.right];
@@ -221,6 +242,7 @@ void TraditionalDetector::pairLights(DetectionResult& result) const {
     armor.confidence = static_cast<float>(1.0 / (1.0 + pair.cost));
     result.armors.push_back(armor);
   }
+  // 按中心位置排序并赋予帧内 ID，该 ID 不承担跨帧身份关联。
   std::sort(result.armors.begin(), result.armors.end(), [](const ArmorCandidate& a, const ArmorCandidate& b) {
     return std::tie(a.center.x, a.center.y, a.is_red) < std::tie(b.center.x, b.center.y, b.is_red);
   });

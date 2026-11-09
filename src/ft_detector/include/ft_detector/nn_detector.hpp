@@ -34,19 +34,8 @@ struct NnInput {
   LetterboxTransform transform;
 };
 
-struct NnDecoded {
-  std::vector<ArmorCandidate> armors;
-  std::size_t threshold_pass = 0;
-  float min_score = 0.0F, max_score = 0.0F;
-};
-
-struct NnResult {
-  NnDecoded decoded;
-  double preprocess_ms = 0.0, inference_ms = 0.0, decode_ms = 0.0;
-};
-
 NnInput prepareNnInput(const cv::Mat& bgr, const NnParams& params);
-NnDecoded decodeNnOutput(const float* values, std::size_t count,
+std::vector<ArmorCandidate> decodeNnOutput(const float* values, std::size_t count,
                         const LetterboxTransform& transform, const NnParams& params);
 
 class NnDetector {
@@ -57,7 +46,7 @@ class NnDetector {
   NnDetector& operator=(const NnDetector&) = delete;
   static void validateParams(const NnParams& params);
   void setThresholds(const NnThresholds& thresholds);
-  NnResult detect(const cv::Mat& bgr);
+  std::vector<ArmorCandidate> detect(const cv::Mat& bgr);
   static std::string backendVersion();
 
  private:

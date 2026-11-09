@@ -1,13 +1,10 @@
 #include <algorithm>
 #include <cctype>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
-#include <iomanip>
 #include <memory>
 #include <stdexcept>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -31,9 +28,12 @@
 #include "ft_detector/traditional_detector.hpp"
 #include "ft_detector/tuning_parameters.hpp"
 
+// 检测节点负责 ROS 接入和组织调用，算法由独立类实现。
 class DetectorNode {
  public:
+  // 启动时加载配置、建立算法对象，再连接输入、输出和调参服务。
   DetectorNode() : private_nh_("~"), image_transport_(nh_) {
+    // 读取话题和检测配置，两种模式都通过同一候选接口输出。
     const auto image_topic = requiredParam<std::string>("image_topic");
     const auto camera_info_topic = requiredParam<std::string>("camera_info_topic");
     const auto debug_image_topic = requiredParam<std::string>("debug_image_topic");
@@ -44,6 +44,7 @@ class DetectorNode {
     traditional_params_ = loadTraditionalParams();
     detector_.reset(new ft_detector::TraditionalDetector(traditional_params_));
     initializeModels();
+    // 设置 PnP、TF 子系名称和跨帧选解历史。
     pnp_enabled_ = requiredParam<bool>("pnp/enabled");
     publish_tf_ = requiredParam<bool>("pnp/publish_tf");
     child_frame_prefix_ = requiredParam<std::string>("pnp/child_frame_prefix");
@@ -64,6 +65,7 @@ class DetectorNode {
       else
         ROS_WARN("Unconfirmed endpoint dimensions: affected armor classes will not publish a pose or TF");
     }
+    // 队列和传输方式由 YAML 控制，启动时拒绝无效配置。
     const auto transport = requiredParam<std::string>("image_transport");
     const int image_queue = requiredParam<int>("image_queue_size");
     const int camera_info_queue = requiredParam<int>("camera_info_queue_size");
@@ -78,10 +80,10 @@ class DetectorNode {
       throw std::invalid_argument("Image, CameraInfo, debug and detection queue sizes must be positive");
     }
 
+    // 注册输出与输入回调；CameraInfo 独立缓存，不要求每帧同步到达。
     debug_publisher_ = image_transport_.advertise(debug_image_topic, debug_queue);
     blue_mask_publisher_ = image_transport_.advertise(blue_mask_topic, debug_queue);
     red_mask_publisher_ = image_transport_.advertise(red_mask_topic, debug_queue);
-    if (compare_modes_) comparison_publisher_ = image_transport_.advertise(comparison_topic_, debug_queue);
     detection_publisher_ = nh_.advertise<ft_detection::DetectionFrame>(detection_topic, detection_queue);
     camera_info_subscriber_ = nh_.subscribe(camera_info_topic, camera_info_queue,
                                            &DetectorNode::cameraInfoCallback, this);
@@ -97,31 +99,8 @@ class DetectorNode {
                                    << ", debug: " << debug_image_topic << ", detections: " << detection_topic);
   }
 
-  ~DetectorNode() {
-    if (frame_count_ > 0) std::clog << "FINAL " << timingSummary() << std::endl;
-  }
-
  private:
-  using Clock = std::chrono::steady_clock;
-
-  static double elapsedMs(Clock::time_point start) {
-    return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
-  }
-
-  std::string timingSummary() const {
-    const auto traditional_count = std::max<std::uint64_t>(1, traditional_frames_);
-    const auto nn_count = std::max<std::uint64_t>(1, nn_frames_);
-    std::ostringstream summary;
-    summary << std::fixed << std::setprecision(3)
-            << "FT_TIMING mode=" << mode_ << " compare=" << compare_modes_ << " frames=" << frame_count_
-            << " traditional_frames=" << traditional_frames_ << " nn_frames=" << nn_frames_
-            << " mean_ms traditional=" << traditional_sum_ms_ / traditional_count
-            << " nn_pre=" << nn_pre_sum_ms_ / nn_count << " nn_infer=" << nn_infer_sum_ms_ / nn_count
-            << " nn_post=" << nn_post_sum_ms_ / nn_count
-            << " callback=" << frame_sum_ms_ / std::max<std::uint64_t>(1, frame_count_);
-    return summary.str();
-  }
-
+  // 参数必须存在且类型正确，避免隐藏的默认值掩盖 YAML 配置错误。
   template <typename T>
   T requiredParam(const std::string& name) const {
     T value;
@@ -131,7 +110,9 @@ class DetectorNode {
     return value;
   }
 
+  // 将参数服务器中的颜色区间和几何阈值组装成传统检测配置。
   ft_detector::TraditionalParams loadTraditionalParams() const {
+    // 三组 HSV 共用同一套字段读取方式。
     const auto hsv = [this](const std::string& name) {
       return ft_detector::HsvRange{
           requiredParam<int>("tuning/" + name + "_h_min"), requiredParam<int>("tuning/" + name + "_h_max"),
@@ -160,6 +141,7 @@ class DetectorNode {
     return params;
   }
 
+  // 读取大小板尺寸、临时尺寸开关以及深度、重投影和绘轴门限。
   ft_detector::PnpParams loadPnpParams() const {
     const auto dimensions = [this](const std::string& name) {
       return ft_detector::ArmorDimensions{requiredParam<double>(name + "/width_m"),
@@ -179,18 +161,15 @@ class DetectorNode {
     return params;
   }
 
+  // 检查模式并配置 OpenCV/NN，仅在 NN 模式创建推理 Session。
   void initializeModels() {
     mode_ = requiredParam<std::string>("mode");
-    compare_modes_ = requiredParam<bool>("compare_modes");
     if (mode_ != "tradition" && mode_ != "nn")
       throw std::invalid_argument("mode must be tradition or nn");
-    comparison_topic_ = requiredParam<std::string>("comparison_topic");
-    comparison_scale_ = requiredParam<double>("comparison_scale");
     const int threads = requiredParam<int>("processing_threads");
-    if (threads <= 0 || comparison_topic_.empty() || !std::isfinite(comparison_scale_) ||
-        comparison_scale_ <= 0.0 || comparison_scale_ > 1.0)
-      throw std::invalid_argument("Invalid processing threads, comparison topic or scale");
+    if (threads <= 0) throw std::invalid_argument("Invalid processing thread count");
     cv::setNumThreads(threads);
+    // 模型路径、协议和筛选参数与传统模式共用的几何参数在此对齐。
     nn_params_.model_path = requiredParam<std::string>("nn/model_path");
     nn_params_.input_width = requiredParam<int>("nn/input_width");
     nn_params_.input_height = requiredParam<int>("nn/input_height");
@@ -204,15 +183,15 @@ class DetectorNode {
         requiredParam<double>("tuning/nn_min_number_score"), requiredParam<double>("tuning/nn_min_confidence"),
         requiredParam<double>("tuning/nn_nms_iou")};
     ft_detector::NnDetector::validateParams(nn_params_);
-    if (mode_ == "nn" || compare_modes_) {
+    if (mode_ == "nn") {
       nn_detector_.reset(new ft_detector::NnDetector(nn_params_));
       ROS_INFO_STREAM("Neural backend: ONNX Runtime " << ft_detector::NnDetector::backendVersion()
                       << " CPU, threads=" << nn_params_.cpu_threads << ", model=" << nn_params_.model_path);
     }
-    ROS_INFO_STREAM("Detection mode=" << mode_ << " compare_modes=" << compare_modes_
-                    << " OpenCV_threads=" << threads);
+    ROS_INFO_STREAM("Detection mode=" << mode_ << " OpenCV_threads=" << threads);
   }
 
+  // 用启动 YAML 设置动态初值与默认值，再注册整组校验的更新回调。
   void initializeTuning() {
     active_tuning_ = ft_detector::tuningFromParams(traditional_params_);
     active_tuning_.nn_min_color_score = nn_params_.thresholds.color_score;
@@ -224,12 +203,14 @@ class DetectorNode {
     if (active_tuning_.__level__(clamped) != 0)
       throw std::invalid_argument("YAML tuning value is outside the Detector.cfg UI range");
 
+    // 实例默认值采用数据集覆盖后的配置，不直接使用 .cfg 的静态默认。
     const ros::NodeHandle tuning_nh(private_nh_, "tuning");
     tuning_server_.reset(new TuningServer(tuning_mutex_, tuning_nh));
     // Seed before setCallback: its initial call must use the loaded YAML, including dataset overrides.
     tuning_server_->updateConfig(active_tuning_);
     tuning_server_->setConfigDefault(active_tuning_);
     tuning_server_->setCallback([this](ft_detector::DetectorConfig& config, std::uint32_t) {
+      // 先组装并校验两种检测配置，合法后统一应用。
       try {
         const auto next = ft_detector::paramsWithTuning(traditional_params_, config);
         auto next_nn = nn_params_;
@@ -242,11 +223,13 @@ class DetectorNode {
         nn_params_ = next_nn;
         traditional_params_ = next;
         active_tuning_ = config;
+        // 检测条件改变后，旧像素对应的 PnP 历史不再继续使用。
         if (changed) {
           pose_history_->reset();
           ROS_INFO("Detector tuning applied; previous PnP references cleared");
         }
       } catch (const std::invalid_argument& error) {
+        // 将整个请求恢复为上一组有效值，同时反馈给调参界面。
         config = active_tuning_;  // The server publishes and stores this valid configuration back to the client.
         ROS_WARN_STREAM("Detector tuning rejected; previous configuration retained: " << error.what());
       }
@@ -254,7 +237,9 @@ class DetectorNode {
     ROS_INFO_STREAM("Dynamic detector tuning: " << tuning_nh.getNamespace());
   }
 
+  // 校验并缓存最新标定，无效消息会主动清空缓存和位姿历史。
   void cameraInfoCallback(const sensor_msgs::CameraInfoConstPtr& message) {
+    // 拒绝未标定、裁剪或分箱与当前支持方式不一致的相机信息。
     const auto finite = [](double value) { return std::isfinite(value); };
     if (message->width == 0 || message->height == 0 || message->header.frame_id.empty() ||
         message->K[0] <= 0.0 || message->K[4] <= 0.0 ||
@@ -270,6 +255,7 @@ class DetectorNode {
       return;
     }
 
+    // 将 ROS 的 K/D 转为算法相机模型，并校验畸变协议。
     ft_detector::CameraCalibration calibration;
     std::copy(message->K.begin(), message->K.end(), calibration.camera_matrix.val);
     calibration.distortion.assign(message->D.begin(), message->D.end());
@@ -281,6 +267,7 @@ class DetectorNode {
       ROS_WARN_THROTTLE(1.0, "Unsupported camera model or invalid K/D; calibration cache cleared");
       return;
     }
+    // 只有标定内容变化时才重置历史；共享指针使缓存跨回调保持有效。
     const bool changed = !camera_info_ || message->width != camera_info_->width ||
                          message->height != camera_info_->height ||
                          message->header.frame_id != camera_info_->header.frame_id ||
@@ -300,13 +287,15 @@ class DetectorNode {
     }
   }
 
+  // 同时返回逐候选 PnP 结果和本帧调试状态，保持候选下标对应。
   struct PoseEvaluation {
     std::vector<ft_detector::PnpResult> poses;
     std::string status;
   };
 
+  // 统一解算选中模式的所有候选，缺标定时保留带原因的失败结果。
   PoseEvaluation estimatePoses(const std::vector<ft_detector::ArmorCandidate>& armors,
-                               double stamp, bool calibration_ready, bool update_history) {
+                               double stamp, bool calibration_ready) {
     PoseEvaluation evaluation;
     evaluation.poses.resize(armors.size());
     evaluation.status = pnp_enabled_ ? "awaiting_camera_info" : "disabled";
@@ -314,32 +303,35 @@ class DetectorNode {
       evaluation.poses[i].pose.id = armors[i].id;
       evaluation.poses[i].reason = evaluation.status;
     }
+    // 先取得唯一匹配的历史参考，整帧解算完成后再替换历史。
     if (pnp_enabled_ && calibration_ready) {
       std::vector<const ft_detector::ArmorPose*> references(armors.size(), nullptr);
-      if (update_history && pose_continuity_enabled_)
+      if (pose_continuity_enabled_)
         references = pose_history_->references(armors, stamp);
       for (std::size_t i = 0; i < armors.size(); ++i)
         evaluation.poses[i] = pnp_solver_->solve(armors[i], calibration_, references[i]);
-      if (update_history && pose_continuity_enabled_) pose_history_->store(armors, evaluation.poses, stamp);
+      if (pose_continuity_enabled_) pose_history_->store(armors, evaluation.poses, stamp);
       evaluation.status = evaluation.poses.empty() ? "no_candidates" : evaluation.poses.front().reason;
+      // 汇总 ready/provisional 状态，便于在图像中说明米制模型来源。
       if (std::any_of(evaluation.poses.begin(), evaluation.poses.end(), [](const auto& pose) { return pose.valid; })) {
         const bool provisional = std::any_of(evaluation.poses.begin(), evaluation.poses.end(),
             [](const auto& pose) { return pose.valid && pose.provisional; });
         evaluation.status = provisional ? "provisional" : "ready";
       }
     }
-    if (update_history && (!pnp_enabled_ || !pose_continuity_enabled_)) pose_history_->reset();
+    if (!pnp_enabled_ || !pose_continuity_enabled_) pose_history_->reset();
     return evaluation;
   }
 
+  // 标注本帧实际运行的检测模式。
   static void labelMode(cv::Mat& image, const std::string& mode) {
     cv::putText(image, "Mode: " + mode, cv::Point(12, std::max(18, image.rows - 12)),
                 cv::FONT_HERSHEY_SIMPLEX, 0.75, cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
   }
 
+  // 图像回调串起检测、PnP、消息/TF 和基础调试图，沿用输入 header。
   void imageCallback(const sensor_msgs::ImageConstPtr& message) {
     try {
-      const auto frame_start = Clock::now();
       // 编码相同时共享解码后的像素；压缩解码和发布输出仍有各自的数据分配。
       const auto shared_image = cv_bridge::toCvShare(message, sensor_msgs::image_encodings::BGR8);
       if (shared_image->image.empty()) {
@@ -348,6 +340,7 @@ class DetectorNode {
         return;
       }
 
+      // 标定尺寸和坐标系必须与图像一致，缺标定仍可继续二维检测。
       const bool calibration_ready = camera_info_ && camera_info_->width == message->width &&
                                      camera_info_->height == message->height &&
                                      camera_info_->header.frame_id == message->header.frame_id;
@@ -356,61 +349,31 @@ class DetectorNode {
         ROS_WARN_THROTTLE(1.0, "No matching CameraInfo; 2D detection continues while calibration is unavailable");
       }
 
-      ft_detector::DetectionResult traditional, neural;
-      if (mode_ == "tradition" || compare_modes_) {
-        const auto start = Clock::now();
-        traditional = detector_->detect(shared_image->image);
-        traditional_sum_ms_ += elapsedMs(start);
-        ++traditional_frames_;
-      }
-      if (nn_detector_) {
-        auto detected = nn_detector_->detect(shared_image->image);
-        neural.armors = std::move(detected.decoded.armors);
-        nn_pre_sum_ms_ += detected.preprocess_ms;
-        nn_infer_sum_ms_ += detected.inference_ms;
-        nn_post_sum_ms_ += detected.decode_ms;
-        if (nn_frames_ == 0) {
-          ROS_INFO_STREAM("NN output float32 [1,21,6300], raw score range=[" << detected.decoded.min_score
-                          << "," << detected.decoded.max_score << "] candidates="
-                          << detected.decoded.threshold_pass << " kept=" << neural.armors.size());
-        }
-        ++nn_frames_;
-      }
-      const auto& result = mode_ == "tradition" ? traditional : neural;
-      const auto evaluation = estimatePoses(result.armors, message->header.stamp.toSec(), calibration_ready, true);
+      // 仅运行选中模式，随后接入共用的位姿和发布流程。
+      ft_detector::DetectionResult result;
+      if (mode_ == "tradition") result = detector_->detect(shared_image->image);
+      else result.armors = nn_detector_->detect(shared_image->image);
+      const auto evaluation = estimatePoses(result.armors, message->header.stamp.toSec(), calibration_ready);
       const auto& poses = evaluation.poses;
       const auto& pnp_status = evaluation.status;
+      // 过滤无效位姿后发布整帧；空数组也用于推进下游丢失状态。
       const auto output = ft_detector::buildDetectionOutput(message->header, result.armors, poses, child_frame_prefix_);
       detection_publisher_.publish(output.frame);  // 包括 detections 为空的成功处理帧。
       if (publish_tf_ && !output.transforms.empty()) tf_broadcaster_.sendTransform(output.transforms);
+      // 在副本绘制候选与坐标轴，发布图像和传统模式的颜色掩膜。
       auto annotated = ft_detector::drawDetections(shared_image->image, result, debug_details_);
       ft_detector::drawPoses(annotated, poses, pnp_status, debug_details_);
       labelMode(annotated, mode_);
       debug_publisher_.publish(cv_bridge::CvImage(
           message->header, sensor_msgs::image_encodings::BGR8, annotated).toImageMsg());
-      if (mode_ == "tradition" || compare_modes_) {
+      if (mode_ == "tradition") {
         blue_mask_publisher_.publish(cv_bridge::CvImage(
-            message->header, sensor_msgs::image_encodings::MONO8, traditional.blue_mask).toImageMsg());
+            message->header, sensor_msgs::image_encodings::MONO8, result.blue_mask).toImageMsg());
         red_mask_publisher_.publish(cv_bridge::CvImage(
-            message->header, sensor_msgs::image_encodings::MONO8, traditional.red_mask).toImageMsg());
+            message->header, sensor_msgs::image_encodings::MONO8, result.red_mask).toImageMsg());
       }
-      if (compare_modes_) {
-        const auto& alternative = mode_ == "tradition" ? neural : traditional;
-        const auto other_poses = estimatePoses(alternative.armors, message->header.stamp.toSec(), calibration_ready, false);
-        auto other = ft_detector::drawDetections(shared_image->image, alternative, debug_details_);
-        ft_detector::drawPoses(other, other_poses.poses, other_poses.status, debug_details_);
-        labelMode(other, mode_ == "tradition" ? "nn" : "tradition");
-        cv::Mat left, right, comparison;
-        const cv::Size size(std::max(1, static_cast<int>(std::lround(message->width * comparison_scale_))),
-                            std::max(1, static_cast<int>(std::lround(message->height * comparison_scale_))));
-        cv::resize(mode_ == "tradition" ? annotated : other, left, size);
-        cv::resize(mode_ == "tradition" ? other : annotated, right, size);
-        cv::hconcat(left, right, comparison);
-        comparison_publisher_.publish(cv_bridge::CvImage(
-            message->header, sensor_msgs::image_encodings::BGR8, comparison).toImageMsg());
-      }
+      // 限频输出运行状态，累计帧数只用于观察节点是否持续处理。
       ++frame_count_;
-      frame_sum_ms_ += elapsedMs(frame_start);
       ROS_INFO_STREAM_THROTTLE(1.0, "Processed image " << frame_count_ << ": " << message->width
                                                      << "x" << message->height
                                                      << " lights=" << result.lights.size()
@@ -419,9 +382,9 @@ class DetectorNode {
                                                      << " published=" << output.frame.detections.size()
                                                      << " frame=" << message->header.frame_id
                                                      << " calibration="
-                                                     << (calibration_ready ? "ready" : "unavailable")
-                                                     << " " << timingSummary());
+                                                     << (calibration_ready ? "ready" : "unavailable"));
     } catch (const cv_bridge::Exception& error) {
+      // 本帧处理失败时清理参考，避免下一帧使用失效的姿态历史。
       pose_history_->reset();
       ROS_ERROR_STREAM("Image conversion failed: " << error.what());
     } catch (const cv::Exception& error) {
@@ -433,23 +396,18 @@ class DetectorNode {
     }
   }
 
+  // ROS 通信句柄与发布者，以及跨图像回调复用的算法和配置对象。
   ros::NodeHandle nh_;
   ros::NodeHandle private_nh_;
   image_transport::ImageTransport image_transport_;
   image_transport::Publisher debug_publisher_;
   image_transport::Publisher blue_mask_publisher_, red_mask_publisher_;
-  image_transport::Publisher comparison_publisher_;
   ros::Publisher detection_publisher_;
   std::unique_ptr<ft_detector::TraditionalDetector> detector_;
   ft_detector::TraditionalParams traditional_params_;
   std::unique_ptr<ft_detector::NnDetector> nn_detector_;
   ft_detector::NnParams nn_params_;
-  std::string mode_, comparison_topic_;
-  bool compare_modes_ = false;
-  double comparison_scale_ = 0.5;
-  double traditional_sum_ms_ = 0.0, nn_pre_sum_ms_ = 0.0, nn_infer_sum_ms_ = 0.0,
-         nn_post_sum_ms_ = 0.0, frame_sum_ms_ = 0.0;
-  std::uint64_t traditional_frames_ = 0, nn_frames_ = 0;
+  std::string mode_;
   using TuningServer = dynamic_reconfigure::Server<ft_detector::DetectorConfig>;
   ft_detector::DetectorConfig active_tuning_;
   boost::recursive_mutex tuning_mutex_;
@@ -468,6 +426,7 @@ class DetectorNode {
   std::uint64_t frame_count_ = 0;
 };
 
+// 注册检测节点并进入 ROS 回调循环，启动失败时返回非零状态。
 int main(int argc, char** argv) {
   ros::init(argc, argv, "ft_detector");
   try {

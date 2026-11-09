@@ -26,6 +26,11 @@ Visualization Manager:
       Name: Rotating target
       Marker Topic: /ft/debug/selector
       Queue Size: 100
+    - Class: rviz/Marker
+      Enabled: true
+      Name: Prediction comparison
+      Marker Topic: /ft/debug/prediction_comparison
+      Queue Size: 100
   Global Options:
     Background Color: 32; 32; 32
     Frame Rate: 30

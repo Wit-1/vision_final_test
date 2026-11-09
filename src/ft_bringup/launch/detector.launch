@@ -1,13 +1,11 @@
 <launch>
   <arg name="dataset" default="blue_1" />
   <arg name="mode" default="tradition" />
-  <arg name="compare_modes" default="false" />
 
   <node pkg="ft_detector" type="ft_detector_node" name="ft_detector" output="screen" required="true">
     <rosparam command="load" file="$(find ft_bringup)/config/detector.yaml" />
     <rosparam command="load" file="$(find ft_bringup)/config/model.yaml" subst_value="true" />
     <rosparam command="load" file="$(find ft_bringup)/config/datasets/$(arg dataset).yaml" />
     <param name="mode" value="$(arg mode)" />
-    <param name="compare_modes" value="$(arg compare_modes)" />
   </node>
 </launch>

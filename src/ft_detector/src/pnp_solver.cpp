@@ -12,10 +12,12 @@
 namespace ft_detector {
 namespace {
 
+// 防止非法数值进入位姿筛选与投影计算。
 bool finiteVector(const cv::Vec3d& vector) {
   return std::isfinite(vector[0]) && std::isfinite(vector[1]) && std::isfinite(vector[2]);
 }
 
+// 已确认尺寸必须为正，未确认尺寸允许留零但不能为负或非有限值。
 bool validDimensions(const ArmorDimensions& dimensions) {
   return std::isfinite(dimensions.width_m) && std::isfinite(dimensions.height_m) &&
          dimensions.width_m >= 0.0 && dimensions.height_m >= 0.0 &&
@@ -24,6 +26,7 @@ bool validDimensions(const ArmorDimensions& dimensions) {
 
 }  // namespace
 
+// 检查物理尺寸和解算门限，构造后统一用于大小板。
 PnpSolver::PnpSolver(const PnpParams& params) : params_(params) {
   const double numbers[] = {params.min_depth_m, params.max_depth_m,
       params.max_reprojection_error_px, params.min_quad_area_px2,
@@ -37,6 +40,7 @@ PnpSolver::PnpSolver(const PnpParams& params) : params_(params) {
   }
 }
 
+// 检查针孔内参形式、图像尺寸与支持的畸变模型。
 bool PnpSolver::validCalibration(const CameraCalibration& camera) {
   const auto& k = camera.camera_matrix;
   if (camera.image_size.width <= 0 || camera.image_size.height <= 0 ||
@@ -53,6 +57,7 @@ bool PnpSolver::validCalibration(const CameraCalibration& camera) {
          (camera.distortion_model == "rational_polynomial" && size == 8);
 }
 
+// 根据板型生成米制物体点，与左上、右上、右下、左下的像素点对应。
 std::vector<cv::Point3d> PnpSolver::objectPoints(bool is_large) const {
   const auto& dimensions = is_large ? params_.large : params_.small;
   if ((!dimensions.confirmed && !params_.allow_provisional_dimensions) ||
@@ -65,10 +70,12 @@ std::vector<cv::Point3d> PnpSolver::objectPoints(bool is_large) const {
           {half_width, half_height, 0.0}, {-half_width, half_height, 0.0}};
 }
 
+// 单块板解算入口：校验输入、求平面候选、筛选选解并生成投影坐标轴。
 PnpResult PnpSolver::solve(const ArmorCandidate& armor, const CameraCalibration& camera,
                           const ArmorPose* reference) const {
   PnpResult result;
   result.pose.id = armor.id;
+  // 尺寸未确认时，只有显式允许临时模型才继续解算。
   const auto& dimensions = armor.is_large_armor ? params_.large : params_.small;
   if (!dimensions.confirmed && (!params_.allow_provisional_dimensions ||
       dimensions.width_m <= 0.0 || dimensions.height_m <= 0.0)) {
@@ -77,6 +84,7 @@ PnpResult PnpSolver::solve(const ArmorCandidate& armor, const CameraCalibration&
   result.provisional = !dimensions.confirmed;
   if (!validCalibration(camera)) { result.reason = "camera_model"; return result; }
 
+  // 所有点必须在图内，构成方向和点序正确、边长足够的凸四边形。
   const std::vector<cv::Point2f> pixels(armor.corners.begin(), armor.corners.end());
   for (const auto& pixel : pixels) {
     if (!std::isfinite(pixel.x) || !std::isfinite(pixel.y) || pixel.x < 0.0F || pixel.y < 0.0F ||
@@ -106,6 +114,7 @@ PnpResult PnpSolver::solve(const ArmorCandidate& armor, const CameraCalibration&
     if (count <= 0) { result.reason = "solver_failed"; return result; }
     double best_error = std::numeric_limits<double>::infinity();
     std::vector<ArmorPose> candidates;
+    // 逐个检查候选的数值、中心和四角深度，以及局部法向朝向。
     for (std::size_t i = 0; i < rotations.size(); ++i) {
       const cv::Vec3d rvec(rotations[i].at<double>(0), rotations[i].at<double>(1), rotations[i].at<double>(2));
       const cv::Vec3d tvec(translations[i].at<double>(0), translations[i].at<double>(1), translations[i].at<double>(2));
@@ -120,6 +129,7 @@ PnpResult PnpSolver::solve(const ArmorCandidate& armor, const CameraCalibration&
       }
       const cv::Vec3d normal(rotation(0, 2), rotation(1, 2), rotation(2, 2));
       if (!depth_valid || normal.dot(tvec) <= 0.0) continue;
+      // 把物体点投回图像，计算四点 RMS 像素误差。
       std::vector<cv::Point2d> reprojection;
       cv::projectPoints(objects, rvec, tvec, camera.camera_matrix, camera.distortion, reprojection);
       double squared_error = 0.0;
@@ -135,6 +145,7 @@ PnpResult PnpSolver::solve(const ArmorCandidate& armor, const CameraCalibration&
       pose.tvec = tvec;
       pose.reprojection_error_px = rms;
       candidates.push_back(pose);
+      // 无历史参考时，默认采用重投影误差最小的合法候选。
       if (rms < best_error) {
         best_error = rms;
         result.pose = pose;
@@ -164,6 +175,7 @@ PnpResult PnpSolver::solve(const ArmorCandidate& armor, const CameraCalibration&
       result.continuity_selected = result.pose.reprojection_error_px > best_error;
     }
 
+    // 将最终位姿的原点和三轴端点投影回图像，供调试图绘制。
     const double axis = params_.axis_length_m;
     const std::vector<cv::Point3d> endpoints{{0, 0, 0}, {axis, 0, 0}, {0, axis, 0}, {0, 0, axis}};
     cv::Matx33d rotation;
@@ -177,6 +189,7 @@ PnpResult PnpSolver::solve(const ArmorCandidate& armor, const CameraCalibration&
     std::vector<cv::Point2d> axis_pixels;
     cv::projectPoints(endpoints, result.pose.rvec, result.pose.tvec,
                       camera.camera_matrix, camera.distortion, axis_pixels);
+    // 限制绘图坐标，防止异常投影在转换为整数时溢出。
     const double drawing_limit = std::numeric_limits<int>::max() / 4.0;
     for (std::size_t i = 0; i < axis_pixels.size(); ++i) {
       if (!std::isfinite(axis_pixels[i].x) || !std::isfinite(axis_pixels[i].y) ||
@@ -185,6 +198,7 @@ PnpResult PnpSolver::solve(const ArmorCandidate& armor, const CameraCalibration&
       }
       result.pose.axis_pixels[i] = axis_pixels[i];
     }
+    // 全部检查通过后才标记有效，OpenCV 异常则返回失败原因。
     result.valid = true;
     result.reason = "accepted";
   } catch (const cv::Exception&) {

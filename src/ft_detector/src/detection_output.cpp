@@ -13,13 +13,16 @@
 namespace ft_detector {
 namespace {
 
+// 检查三维向量，避免 NaN 或无穷大进入消息和 TF。
 bool finiteVector(const cv::Vec3d& value) {
   return std::isfinite(value[0]) && std::isfinite(value[1]) && std::isfinite(value[2]);
 }
 
+// 将 PnP 的旋转向量和平移转换为 ROS Pose，失败时交给上层过滤。
 bool convertPose(const ArmorPose& input, geometry_msgs::Pose& output) {
   if (!finiteVector(input.rvec) || !finiteVector(input.tvec) || input.tvec[2] <= 0.0) return false;
   try {
+    // Rodrigues 得到旋转矩阵，再转换为归一化四元数。
     cv::Matx33d rotation;
     cv::Rodrigues(input.rvec, rotation);
     if (!std::all_of(std::begin(rotation.val), std::end(rotation.val),
@@ -32,6 +35,7 @@ bool convertPose(const ArmorPose& input, geometry_msgs::Pose& output) {
     const double norm_squared = quaternion.length2();
     if (!std::isfinite(norm_squared) || norm_squared <= 0.0) return false;
     quaternion.normalize();
+    // 平移直接采用相机系中的米制坐标。
     output.position.x = input.tvec[0];
     output.position.y = input.tvec[1];
     output.position.z = input.tvec[2];
@@ -47,6 +51,7 @@ bool convertPose(const ArmorPose& input, geometry_msgs::Pose& output) {
 
 }  // namespace
 
+// 从同一批候选和位姿构造检测消息与 TF，保证两路输出一致。
 DetectionOutput buildDetectionOutput(const std_msgs::Header& image_header,
                                      const std::vector<ArmorCandidate>& armors,
                                      const std::vector<PnpResult>& poses,
@@ -56,6 +61,7 @@ DetectionOutput buildDetectionOutput(const std_msgs::Header& image_header,
   output.frame.header = image_header;
   if (image_header.frame_id.empty() || child_frame_prefix.empty()) return output;
   std::set<std::uint32_t> used_ids;
+  // 逐个检查有效位姿、候选 ID、评分和角点；不合格项不发布。
   for (std::size_t i = 0; i < armors.size(); ++i) {
     const auto& armor = armors[i];
     const auto& result = poses[i];
@@ -68,6 +74,7 @@ DetectionOutput buildDetectionOutput(const std_msgs::Header& image_header,
     if (child == image_header.frame_id) continue;
     ft_detection::Detection detection;
     if (!convertPose(result.pose, detection.pose)) continue;
+    // 保留帧内 ID 和像素角点，PnP 过滤后不重新编号。
     detection.id = armor.id;
     detection.is_red = armor.is_red;
     detection.is_large_armor = armor.is_large_armor;
@@ -78,6 +85,7 @@ DetectionOutput buildDetectionOutput(const std_msgs::Header& image_header,
       detection.corners[j].z = 0.0F;  // Point32 承载二维像素；不是第三个空间坐标。
     }
 
+    // TF 复用已经转换的 Pose，使用输入图像的时间戳与父坐标系。
     geometry_msgs::TransformStamped transform;
     transform.header = output.frame.header;
     transform.child_frame_id = child;
