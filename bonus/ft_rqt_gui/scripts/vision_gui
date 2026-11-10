@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""Start a dedicated rqt window and only manage a ROS master created here."""
+
+import fcntl
+import hashlib
+import os
+from pathlib import Path
+import signal
+import sys
+import tempfile
+import time
+
+from ft_rqt_gui.configuration import project_root
+from ft_rqt_gui.processes import OwnedProcess, master_call
+
+
+def main():
+    root = project_root()
+    uri = os.environ.get('ROS_MASTER_URI', 'http://localhost:11311')
+    key = hashlib.sha256(uri.encode()).hexdigest()[:16]
+    lock_path = Path(tempfile.gettempdir()) / ('ft-rqt-gui-{}-{}.lock'.format(os.getuid(), key))
+    lock = lock_path.open('a')
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print('A control console already uses this ROS master. Use the existing window.', file=sys.stderr)
+        return 1
+
+    core = gui = None
+    interrupted = False
+
+    def request_stop(*_):
+        nonlocal interrupted
+        interrupted = True
+
+    signal.signal(signal.SIGINT, request_stop)
+    signal.signal(signal.SIGTERM, request_stop)
+    try:
+        try:
+            master_call('getPid')
+            print('Reusing the existing ROS master.', flush=True)
+        except Exception:
+            # 不改变远程 master 的归属；只允许为本机 URI 创建 roscore。
+            from urllib.parse import urlparse
+            if urlparse(uri).hostname not in ('localhost', '127.0.0.1', '::1'):
+                raise RuntimeError('Cannot connect to the remote ROS master. Start it first.')
+            print('Starting a ROS master owned by this console...', flush=True)
+            port = urlparse(uri).port or 11311
+            core = OwnedProcess(['roscore', '-p', str(port)], root,
+                                lambda line: print('[master] ' + line, flush=True))
+            deadline = time.monotonic() + 10.0
+            while True:
+                if interrupted:
+                    return 0
+                if core.process.poll() is not None:
+                    raise RuntimeError('The ROS master failed to start.')
+                try:
+                    master_call('getPid')
+                    break
+                except Exception:
+                    if time.monotonic() > deadline:
+                        raise RuntimeError('Timed out waiting for the ROS master.')
+                    time.sleep(0.1)
+        # GUI 与 ROS 节点共用同一 Noetic 环境；独立配置名不覆盖用户的其他 rqt 布局。
+        env = dict(os.environ, FT_RQT_GUI_PROJECT_ROOT=str(root),
+                   LANG='C.UTF-8', LC_ALL='C.UTF-8', LANGUAGE='en')
+        gui = OwnedProcess([sys.executable, '-m', 'ft_rqt_gui.window', *sys.argv[1:]], root, env=env)
+        while gui.process.poll() is None and not interrupted:
+            gui.remember()
+            time.sleep(0.1)
+        return 0 if interrupted else gui.process.returncode
+    except Exception as error:
+        print('GUI startup failed: ' + str(error), file=sys.stderr)
+        return 1
+    finally:
+        # GUI 正常关闭会先清理会话；异常关闭时仍按已记录的进程身份回收后代。
+        for process in (gui, core):
+            if process:
+                try:
+                    process.stop()
+                except Exception as error:
+                    print('Shutdown cleanup failed: ' + str(error), file=sys.stderr)
+        lock.close()
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

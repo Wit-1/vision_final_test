@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>ft_rqt_gui</name>
+  <version>0.1.0</version>
+  <description>rqt control panel for the vision final test.</description>
+  <maintainer email="268838183+Wit-1@users.noreply.github.com">Wit</maintainer>
+  <license>BSD-3-Clause</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>roscpp</depend>
+  <depend>rviz</depend>
+  <depend>std_msgs</depend>
+  <depend>pluginlib</depend>
+  <build_depend>qtbase5-dev</build_depend>
+  <exec_depend>ft_bringup</exec_depend>
+  <exec_depend>rqt_gui</exec_depend>
+  <exec_depend>rqt_gui_py</exec_depend>
+  <exec_depend>python_qt_binding</exec_depend>
+  <exec_depend>rqt_reconfigure</exec_depend>
+  <exec_depend>dynamic_reconfigure</exec_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>rosgraph</exec_depend>
+  <exec_depend>rosbag</exec_depend>
+  <exec_depend>roslaunch</exec_depend>
+  <exec_depend>rospkg</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>message_filters</exec_depend>
+  <exec_depend>roslib</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <export>
+    <rqt_gui plugin="${prefix}/plugin.xml" />
+    <rviz plugin="${prefix}/rviz_plugin.xml" />
+  </export>
+</package>

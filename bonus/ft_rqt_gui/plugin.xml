@@ -1,0 +1,11 @@
+<library path="src">
+  <class name="ft_rqt_gui/ControlPanel" type="ft_rqt_gui.plugin.ControlPanel" base_class_type="rqt_gui_py::Plugin">
+    <description>Control playback, detection and visualization in one window.</description>
+    <qtgui>
+      <group><label>Vision Final Test</label></group>
+      <label>Vision Control Panel</label>
+      <icon type="theme">applications-science</icon>
+      <statustip>Armor Debug Console</statustip>
+    </qtgui>
+  </class>
+</library>

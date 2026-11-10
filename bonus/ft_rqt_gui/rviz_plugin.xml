@@ -1,0 +1,5 @@
+<library path="lib/libft_gui_orbit_sync">
+  <class name="ft_rqt_gui/OrbitSync" type="ft_rqt_gui::OrbitSync" base_class_type="rviz::Panel">
+    <description>Link Orbit rotation, pan and zoom between two comparison windows.</description>
+  </class>
+</library>
