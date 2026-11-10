@@ -8,7 +8,6 @@
 
 ```text
 vision_final_test/                     # 独立 Git 仓库、独立 catkin 工作空间
-├── PLAN.md                            # 实施步骤与验收方式
 ├── README.md                          # 项目入口：环境、构建、运行、参数、限制
 ├── ai_usage.md                        # 关键 AI 辅助和本人项目决策
 ├── .gitignore                         # 排除素材、依赖、缓存和生成结果
@@ -66,6 +65,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   │       ├── target_selector.cpp    # 未来可见性、选板和有效性
 │   │       └── selector_node.cpp      # ROS 输入输出及车体、装甲板 marker
 │   │
+│   ├── ft_rqt_gui -> ../bonus/ft_rqt_gui # 附加题包的 catkin 入口
 │   └── ft_bringup/                    # 集中管理启动、参数和可视化
 │       ├── launch/
 │       │   ├── demo.launch           # 对外统一启动入口
@@ -90,6 +90,34 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │       └── rviz/
 │           └── vision.rviz
 │
+├── bonus/
+│   ├── README.md                     # rqt 附加题的使用、结构、AI 辅助和限制
+│   └── ft_rqt_gui/                   # rqt GUI 与 RViz 视角同步插件包
+│       ├── package.xml
+│       ├── CMakeLists.txt
+│       ├── setup.py
+│       ├── plugin.xml
+│       ├── rviz_plugin.xml           # 注册 Orbit 同步面板
+│       ├── launch/side.launch        # 单侧业务链路与话题隔离
+│       ├── scripts/
+│       │   ├── vision_gui            # GUI 和 ROS master 入口
+│       │   ├── workspace_probe       # 在所选环境内检查编译产物和接口
+│       │   └── compare_images        # 同时间戳的两侧图像拼图
+│       └── src/
+│           ├── orbit_sync.hpp        # 视角同步面板接口
+│           ├── orbit_sync.cpp        # Orbit 属性同步与回写抑制
+│           └── ft_rqt_gui/
+│               ├── __init__.py
+│               ├── window.py         # 独立 rqt 配置
+│               ├── plugin.py         # 界面与信号连接
+│               ├── configuration.py  # 素材与单路、双路会话
+│               ├── workspace.py      # 环境与程序、动态库来源检查
+│               ├── session_controller.py # 后台启停与统一回放
+│               ├── processes.py      # 进程所有权与回收
+│               ├── viewers.py        # RViz 配置生成和窗口管理
+│               ├── image_view.py     # 各图源最新帧显示
+│               └── parameter_view.py # 选择左右节点并复用参数编辑器
+│
 ├── tools/                            # 开发辅助工具，不参与在线算法
 │   ├── README.md                    # 独立性能工具的构建、参数和统计范围
 │   ├── setup_inference.sh            # 安装本地 C++ 推理与模型准备依赖
@@ -102,6 +130,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   └── comparison.launch           # 对比工具启动入口
 │
 └── docs/
+    ├── PLAN.md                       # 原实施计划，归档后不再更新
     ├── file_guide.md                 # 项目结构、文件用途和任务归属
     ├── images/
     │   ├── nn_corner_definition_check.png # NN 选点定义的临时实验结果图
@@ -111,7 +140,10 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
     │   ├── prediction_marker_rviz.png # 单板提前量位置标记
     │   ├── detection_comparison.png  # 原始 bag 的同帧检测对比
     │   ├── rotation_prediction.png   # 换板预测的投影对照
-    │   └── ros_graph.png             # 实际话题图导出
+    │   ├── ros_graph.png             # 实际话题图导出
+    │   ├── gui_control_panel.png     # rqt 控制台与同帧对比
+    │   ├── gui_parameters.png        # 内嵌动态参数编辑器
+    │   └── gui_rviz_comparison.png   # 双 RViz 视角联动与独立结果
     └── learning_log.md               # 项目相关的实际学习问答及必要纠正
 ```
 
@@ -121,7 +153,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 - `.hpp` 声明类型和接口，`.cpp` 实现算法；节点文件负责 ROS 通信和组织调用。
 - `ft_bringup` 管理配置与启动；检测、滤波和选板算法放在各自业务包内。
 - 两种检测方式返回相同的 `ArmorCandidate`，随后使用同一个 PnP 和消息发布流程。
-- 正式文档和功能所需辅助工具随模块增长；每次创建时解释用途。自动验证材料临时使用后清理，不加入项目目录蓝图和学习安排。
+- 辅助工具集中在 tools 和 bonus；自动验证材料使用后清理，不纳入版本管理。
 
 工作空间与环境约定：
 
@@ -136,11 +168,11 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 
 | 文件 | 用途 | 任务归属 |
 |---|---|---|
-| [PLAN.md](../PLAN.md) | 实施顺序、学习步骤与验收方式 | 全程 |
+| [docs/PLAN.md](PLAN.md) | 原实施计划，归档保留，后续不再更新 | 全程 |
 | [README.md](../README.md) | 环境、构建、运行、仓库结构和按题目组织的实现说明 | 全程 |
 | [ai_usage.md](../ai_usage.md) | 关键 AI 辅助和本人项目决策 | 全程 |
 | [.gitignore](../.gitignore) | 忽略素材、依赖缓存和生成结果 | 1.1 |
-| [run.sh](../run.sh) | 加载本项目环境，检查依赖，提供主工程与工具构建、基准、对比、完整链路启动和回放入口 | 1.1、1.4、7.1、10.1～10.3 |
+| [run.sh](../run.sh) | 加载环境，提供构建、基准、对比、完整链路、回放和 GUI 入口 | 1.1、1.4、7.1、10.1～10.3、附加题 |
 | [docs/file_guide.md](file_guide.md) | 项目结构、当前文件用途及任务归属 | 全程 |
 | [docs/learning_log.md](learning_log.md) | 项目相关的实际学习问答及必要纠正 | 全程 |
 | [docs/images/nn_corner_definition_check.png](images/nn_corner_definition_check.png) | 模型输出四点与灯条端点的放大对照，供 Task8 项目决策说明使用 | 8.4 |
@@ -218,4 +250,35 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [tools/summarize_timings.py](../tools/summarize_timings.py) | 按数据集和模式计算平均值、最近秩 P95 和样本数 | 10.2 |
 | [tools/compare_detections.py](../tools/compare_detections.py) | 按时间戳与坐标系同步两路调试图并拼接 | 8.5、10.2 |
 | [tools/compare_predictions.py](../tools/compare_predictions.py) | 同步 Track/Target 并发布预测端点对照灰线 | 9.5、10.2 |
-| [tools/comparison.launch](../tools/comparison.launch) | 启动正常链路、隔离的辅助检测和两种对比工具 | 10.2 |
+| [tools/comparison.launch](../tools/comparison.launch) | 启动正式链路与辅助检测；跟踪和选板可分别关闭，两路均开启时才运行预测对照 | 10.2、附加题 |
+
+## 附加题 GUI 文件
+
+| 文件 | 用途 |
+|---|---|
+| [bonus/README.md](../bonus/README.md) | 工具目标、操作、调用关系、AI 辅助与限制 |
+| [src/ft_rqt_gui](../src/ft_rqt_gui) | 指向 bonus 包的相对符号链接，仅用于 catkin 包发现 |
+| [package.xml](../bonus/ft_rqt_gui/package.xml) | GUI、ROS、调参依赖及插件导出 |
+| [CMakeLists.txt](../bonus/ft_rqt_gui/CMakeLists.txt) | 安装 Python 模块与入口，构建并注册 Orbit 插件 |
+| [setup.py](../bonus/ft_rqt_gui/setup.py) | catkin 的 Python 包声明 |
+| [plugin.xml](../bonus/ft_rqt_gui/plugin.xml) | 注册 rqt 插件名称和 Python 类 |
+| [scripts/vision_gui](../bonus/ft_rqt_gui/scripts/vision_gui) | 管理单个控制台窗口及自己创建的 ROS master |
+| [window.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/window.py) | 使用独立 rqt 配置加载控制台 |
+| [plugin.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/plugin.py) | 界面布局、选项收集、状态及日志显示 |
+| [configuration.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/configuration.py) | 读取现有 YAML，验证素材、模型和回放范围 |
+| [session_controller.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/session_controller.py) | 后台串行处理启停、切换、暂停和节点监控 |
+| [processes.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/processes.py) | 限时 master 调用与按进程身份执行的回收 |
+| [image_view.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/image_view.py) | 原图、检测结果或对比图的最新帧显示 |
+| [parameter_view.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/parameter_view.py) | 分别连接左右动态服务，在 Qt 主线程创建官方参数控件 |
+| [__init__.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/__init__.py) | Python 模块包入口 |
+| [gui_control_panel.png](images/gui_control_panel.png) | 真实控制台与同帧对比截图 |
+| [gui_parameters.png](images/gui_parameters.png) | 真实控制台内的参数编辑截图 |
+| [workspace.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/workspace.py) | 单独加载工作区环境，核实程序及项目动态库的实际来源 |
+| [workspace_probe](../bonus/ft_rqt_gui/scripts/workspace_probe) | 在对应环境中检查包路径、模型、节点程序和消息接口 |
+| [side.launch](../bonus/ft_rqt_gui/launch/side.launch) | 加载原有业务节点并隔离两侧输入输出与 TF |
+| [compare_images](../bonus/ft_rqt_gui/scripts/compare_images) | 同时间戳匹配两侧图像，添加标签并拼接 |
+| [viewers.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/viewers.py) | 根据 CameraInfo 创建临时 RViz 配置并管理窗口 |
+| [orbit_sync.hpp](../bonus/ft_rqt_gui/src/orbit_sync.hpp) | 视角同步面板的声明与状态 |
+| [orbit_sync.cpp](../bonus/ft_rqt_gui/src/orbit_sync.cpp) | 双向同步 Orbit 的角度、距离、焦点，暂停时仍运行 |
+| [rviz_plugin.xml](../bonus/ft_rqt_gui/rviz_plugin.xml) | 向 RViz 注册 OrbitSync 面板 |
+| [gui_rviz_comparison.png](images/gui_rviz_comparison.png) | Baseline 与 Candidate 的真实双 RViz 截图 |

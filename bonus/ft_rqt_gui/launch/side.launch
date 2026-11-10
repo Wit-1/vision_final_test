@@ -1,0 +1,54 @@
+<launch>
+  <arg name="dataset" />
+  <arg name="mode" />
+  <arg name="node_ns" default="/" />
+  <arg name="prefix" default="/ft" />
+  <arg name="tf_topic" default="/tf" />
+  <arg name="tf_static_topic" default="/tf_static" />
+  <arg name="image_topic" />
+  <arg name="camera_info_topic" />
+  <arg name="tracker" default="true" />
+  <arg name="selector" default="true" />
+  <arg name="prediction_comparison" default="false" />
+  <param name="/use_sim_time" value="true" />
+
+  <!-- This file is shared, but package lookup happens in this side's own environment. -->
+  <group ns="$(arg node_ns)">
+    <remap from="/tf" to="$(arg tf_topic)" />
+    <remap from="/tf_static" to="$(arg tf_static_topic)" />
+    <include file="$(find ft_bringup)/launch/detector.launch">
+      <arg name="dataset" value="$(arg dataset)" />
+      <arg name="mode" value="$(arg mode)" />
+    </include>
+    <param name="ft_detector/image_topic" value="$(arg image_topic)" />
+    <param name="ft_detector/camera_info_topic" value="$(arg camera_info_topic)" />
+    <param name="ft_detector/image_transport" value="compressed" />
+    <param name="ft_detector/detection_topic" value="$(arg prefix)/detection" />
+    <param name="ft_detector/debug_image_topic" value="$(arg prefix)/debug/image" />
+    <param name="ft_detector/blue_mask_topic" value="$(arg prefix)/debug/mask/blue" />
+    <param name="ft_detector/red_mask_topic" value="$(arg prefix)/debug/mask/red" />
+    <param name="ft_detector/pnp/publish_tf" value="true" />
+
+    <group if="$(arg tracker)">
+      <include file="$(find ft_bringup)/launch/tracker.launch" />
+      <param name="ft_tracker/detection_topic" value="$(arg prefix)/detection" />
+      <param name="ft_tracker/track_topic" value="$(arg prefix)/track" />
+      <param name="ft_tracker/marker_topic" value="$(arg prefix)/debug/marker" />
+    </group>
+    <group if="$(arg selector)">
+      <include file="$(find ft_bringup)/launch/selector.launch" />
+      <param name="ft_selector/detection_topic" value="$(arg prefix)/detection" />
+      <param name="ft_selector/target_topic" value="$(arg prefix)/target" />
+      <param name="ft_selector/marker_topic" value="$(arg prefix)/debug/selector" />
+    </group>
+    <node if="$(arg prediction_comparison)" pkg="ft_bringup" type="compare_predictions.py"
+          name="compare_predictions" output="screen" required="true">
+      <param name="linear/track_topic" value="$(arg prefix)/track" />
+      <param name="rotating/target_topic" value="$(arg prefix)/target" />
+      <param name="output_topic" value="$(arg prefix)/debug/prediction_comparison" />
+      <param name="queue_size" value="20" />
+      <param name="line_width_m" value="0.01" />
+      <param name="lifetime_s" value="0.6" />
+    </node>
+  </group>
+</launch>

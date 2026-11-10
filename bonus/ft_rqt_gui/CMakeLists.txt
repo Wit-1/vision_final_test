@@ -1,0 +1,18 @@
+cmake_minimum_required(VERSION 3.0.2)
+project(ft_rqt_gui)
+
+find_package(catkin REQUIRED COMPONENTS roscpp rviz std_msgs pluginlib)
+find_package(Qt5 REQUIRED COMPONENTS Widgets)
+set(CMAKE_AUTOMOC ON)
+catkin_python_setup()
+catkin_package(LIBRARIES ft_gui_orbit_sync CATKIN_DEPENDS roscpp rviz std_msgs pluginlib)
+add_library(ft_gui_orbit_sync src/orbit_sync.cpp src/orbit_sync.hpp)
+target_compile_features(ft_gui_orbit_sync PRIVATE cxx_std_14)
+target_compile_options(ft_gui_orbit_sync PRIVATE -Wall -Wextra)
+target_include_directories(ft_gui_orbit_sync SYSTEM PRIVATE ${catkin_INCLUDE_DIRS})
+target_link_libraries(ft_gui_orbit_sync ${catkin_LIBRARIES} Qt5::Widgets)
+catkin_install_python(PROGRAMS scripts/vision_gui scripts/compare_images scripts/workspace_probe
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+install(TARGETS ft_gui_orbit_sync LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION})
+install(FILES plugin.xml rviz_plugin.xml DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
+install(DIRECTORY launch DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})

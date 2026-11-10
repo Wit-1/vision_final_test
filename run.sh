@@ -15,6 +15,7 @@ usage() {
   ./run.sh build-tools
   ./run.sh benchmark [--dataset blue_1] [--mode tradition|nn] [--start 0] [--duration 1]
   ./run.sh compare [dataset:=blue_1] [mode:=nn] [gui:=true] [rviz:=true]
+  ./run.sh gui
   ./run.sh launch [dataset:=blue_1] [mode:=tradition|nn]
                   [tracker:=true] [selector:=true] [use_sim_time:=true]
                   [gui:=true] [rviz:=false] [reconfigure:=false]
@@ -28,7 +29,7 @@ USAGE
 
 case "$command_name" in
     help|-h|--help) usage; exit 0 ;;
-    check|setup-inference|prepare-model|build|build-tools|benchmark|compare|launch|play) ;;
+    check|setup-inference|prepare-model|build|build-tools|benchmark|compare|gui|launch|play) ;;
     *) usage >&2; exit 2 ;;
 esac
 
@@ -118,6 +119,15 @@ PY
     compare)
         load_workspace
         exec roslaunch "$project_root/tools/comparison.launch" "$@"
+        ;;
+    gui)
+        load_workspace
+        if ! rospack find ft_rqt_gui >/dev/null 2>&1; then
+            echo 'The GUI package is not built. Run ./run.sh build first.' >&2
+            exit 1
+        fi
+        export FT_RQT_GUI_PROJECT_ROOT="$project_root"
+        exec rosrun ft_rqt_gui vision_gui "$@"
         ;;
     play)
         if [ "$#" -lt 1 ]; then usage >&2; exit 2; fi

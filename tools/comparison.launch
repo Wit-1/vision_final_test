@@ -5,6 +5,8 @@
   <arg name="rviz" default="true" />
   <arg name="reconfigure" default="false" />
   <arg name="use_sim_time" default="true" />
+  <arg name="tracker" default="true" />
+  <arg name="selector" default="true" />
 
   <include file="$(find ft_bringup)/launch/demo.launch">
     <arg name="dataset" value="$(arg dataset)" />
@@ -13,6 +15,8 @@
     <arg name="rviz" value="$(arg rviz)" />
     <arg name="reconfigure" value="$(arg reconfigure)" />
     <arg name="use_sim_time" value="$(arg use_sim_time)" />
+    <arg name="tracker" value="$(arg tracker)" />
+    <arg name="selector" value="$(arg selector)" />
   </include>
 
   <!-- The other detector only supplies comparison images. Its detections and TF are isolated. -->
@@ -36,7 +40,7 @@
     <param name="queue_size" value="20" />
   </node>
 
-  <node pkg="ft_bringup" type="compare_predictions.py" name="compare_predictions" output="screen" required="true">
+  <node if="$(eval arg('tracker') and arg('selector'))" pkg="ft_bringup" type="compare_predictions.py" name="compare_predictions" output="screen" required="true">
     <rosparam command="load" file="$(find ft_bringup)/config/tracker.yaml" ns="linear" />
     <rosparam command="load" file="$(find ft_bringup)/config/selector.yaml" ns="rotating" />
     <param name="output_topic" value="/ft/debug/prediction_comparison" />

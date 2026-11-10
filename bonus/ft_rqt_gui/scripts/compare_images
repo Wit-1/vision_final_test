@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Publish a labelled pair only when both debug images have the same header time."""
+
+import cv2
+from cv_bridge import CvBridge, CvBridgeError
+import message_filters
+import rospy
+from sensor_msgs.msg import Image
+
+
+class Comparison:
+    def __init__(self):
+        self.bridge = CvBridge()
+        self.labels = [rospy.get_param('~left_label'), rospy.get_param('~right_label')]
+        self.output = rospy.Publisher('/ft/debug/comparison', Image, queue_size=1)
+        self.inputs = [message_filters.Subscriber(rospy.get_param('~'+side+'_topic'), Image, queue_size=20)
+                       for side in ('left', 'right')]
+        self.sync = message_filters.TimeSynchronizer(self.inputs, 20, reset=True)
+        self.sync.registerCallback(self.receive)
+
+    def receive(self, left, right):
+        if left.header.frame_id != right.header.frame_id:
+            rospy.logwarn_throttle(1.0, 'Comparison skipped: camera frame_ids differ')
+            return
+        try:
+            images = [self.bridge.imgmsg_to_cv2(msg, 'bgr8') for msg in (left, right)]
+            if images[0].shape != images[1].shape:
+                rospy.logwarn_throttle(1.0, 'Comparison skipped: image dimensions differ')
+                return
+            # 标签另加顶栏，不覆盖业务节点已有的角点、坐标轴和检测编号。
+            panels = []
+            for image, label in zip(images, self.labels):
+                image = cv2.resize(image, None, fx=0.5, fy=0.5)
+                image = cv2.copyMakeBorder(image, 32, 0, 0, 0, cv2.BORDER_CONSTANT, value=(38, 43, 50))
+                cv2.putText(image, label, (10, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (240, 240, 240), 1, cv2.LINE_AA)
+                panels.append(image)
+            result = self.bridge.cv2_to_imgmsg(cv2.hconcat(panels), 'bgr8')
+            result.header = left.header
+            self.output.publish(result)
+        except (CvBridgeError, cv2.error) as error:
+            rospy.logwarn_throttle(1.0, 'Comparison image conversion failed: %s', error)
+
+
+if __name__ == '__main__':
+    rospy.init_node('ft_gui_comparison')
+    comparison = Comparison()
+    rospy.spin()
