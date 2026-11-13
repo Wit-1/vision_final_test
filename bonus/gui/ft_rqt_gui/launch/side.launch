@@ -40,6 +40,7 @@
       <param name="ft_selector/detection_topic" value="$(arg prefix)/detection" />
       <param name="ft_selector/target_topic" value="$(arg prefix)/target" />
       <param name="ft_selector/marker_topic" value="$(arg prefix)/debug/selector" />
+      <param name="ft_selector/prediction_topic" value="$(arg prefix)/debug/rotation_prediction" />
     </group>
     <node if="$(arg prediction_comparison)" pkg="ft_bringup" type="compare_predictions.py"
           name="compare_predictions" output="screen" required="true">

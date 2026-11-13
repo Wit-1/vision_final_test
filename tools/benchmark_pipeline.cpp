@@ -178,6 +178,15 @@ ft_selector::RotatingParams rotatingParams(const YAML::Node& config) {
   params.yaw_variance = required<double>(config, "yaw_variance");
   params.initial_velocity_variance = required<double>(config, "initial_velocity_variance");
   params.initial_omega_variance = required<double>(config, "initial_omega_variance");
+  const auto geometry = config["geometry"];
+  params.radius_min_m = required<double>(geometry, "radius_min_m");
+  params.radius_max_m = required<double>(geometry, "radius_max_m");
+  params.max_height_difference_m = required<double>(geometry, "max_height_difference_m");
+  params.initial_geometry_variance = required<double>(geometry, "initial_variance");
+  params.geometry_noise_density = required<double>(geometry, "noise_density");
+  params.geometry_min_phase_span_rad = required<double>(geometry, "min_phase_span_rad");
+  params.geometry_min_observations = required<int>(geometry, "min_observations");
+  params.estimate_pair_offsets = required<bool>(geometry, "estimate_pair_offsets");
   return params;
 }
 

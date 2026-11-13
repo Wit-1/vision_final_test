@@ -20,7 +20,9 @@ def main():
     packages += (['ft_tracker'] if tracker == '1' else []) + (['ft_selector'] if selector == '1' else [])
     rospack = rospkg.RosPack()
     for name in packages:
-        if Path(rospack.get_path(name)).resolve() != root / 'src' / name:
+        actual = Path(rospack.get_path(name)).resolve()
+        expected = (root / 'src' / name).resolve()
+        if actual != expected or root not in actual.parents:
             raise ValueError('ROS package resolves outside the selected workspace: ' + name)
     config = root / 'src/ft_bringup/config'
     profile = config / 'datasets' / (dataset + '.yaml')
@@ -48,7 +50,8 @@ def main():
             raise ValueError('Node resolves outside the selected workspace: ' + str(executable))
         executables[name] = str(executable)
     signatures = {cls._type: cls._md5sum for cls in (Detection, DetectionFrame, Track, Target)}
-    print(json.dumps(dict(executables=executables, signatures=signatures)))
+    prediction_debug = (root / 'src/ft_msgs/msg/PredictionDebug.msg').is_file()
+    print(json.dumps(dict(executables=executables, signatures=signatures, prediction_debug=prediction_debug)))
 
 
 if __name__ == '__main__':

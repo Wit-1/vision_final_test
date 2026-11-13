@@ -19,6 +19,8 @@ BUSINESS_NODES = {'/ft_detector', '/ft_tracker', '/ft_selector', '/ft_comparison
                   '/ft_gui_other/ft_detector', '/ft_gui_other/ft_tracker', '/ft_gui_other/ft_selector',
                   '/ft_gui_other/compare_predictions', '/ft_gui_comparison',
                   '/ft_gui_rviz_primary', '/ft_gui_rviz_other'}
+BUSINESS_NODES.update({'/prediction_overlay', '/ft_gui_overlay_primary', '/ft_gui_overlay_other',
+                       '/ft_gui_prediction_comparison'})
 
 
 class Cancelled(Exception):
@@ -101,7 +103,9 @@ class SessionController(QObject):
         conflicts = sorted(nodes & BUSINESS_NODES)
         clocks = publishers.get('/clock', [])
         outputs = ('/ft/detection', '/ft/track', '/ft/target', '/ft/debug/image',
-                   '/ft/gui/other/detection', '/ft/gui/other/debug/image', '/ft/debug/comparison')
+                   '/ft/gui/other/detection', '/ft/gui/other/debug/image', '/ft/debug/comparison',
+                   '/ft/debug/prediction_image', '/ft/gui/other/debug/prediction_image',
+                   '/ft/debug/prediction_comparison_image')
         conflicts += [name for topic in outputs for name in publishers.get(topic, [])]
         if conflicts or clocks:
             raise RuntimeError('An external session is active. Stop it first: ' + ', '.join(sorted(set(conflicts + clocks))))
@@ -188,7 +192,7 @@ class SessionController(QObject):
                 self._cancel.wait(0.1)
         self.active = session
         self.session_changed.emit(session)
-        shared_launch = self.catalog.root / 'bonus/ft_rqt_gui/launch/side.launch'
+        shared_launch = self.catalog.root / 'bonus/gui/ft_rqt_gui/launch/side.launch'
         self.expected = set()
         self._business = {}
         for side in session.sides:
@@ -211,6 +215,20 @@ class SessionController(QObject):
                 side.workspace.root, lambda line, label=side.label: self.log.emit('['+label+'] '+line),
                 env=side.workspace.environment))
             self.log.emit('Starting {} ({}) from {}'.format(side.label, side.mode, side.workspace.root))
+        # 投影工具始终随选板运行，使用控制台环境，旧工作区无需安装新增工具或消息。
+        if options.selector:
+            for side in session.sides:
+                name = 'ft_gui_overlay_primary' if side.primary else 'ft_gui_overlay_other'
+                self.pipelines.append(OwnedProcess(
+                    ['rosrun', 'ft_bringup', 'reproject_predictions.py', '__name:=' + name,
+                     '_image_topic:=' + side.prefix + '/debug/image',
+                     '_camera_info_topic:=' + session.camera_info_topic,
+                     '_prediction_topic:=' + side.prefix + '/debug/rotation_prediction',
+                     '_target_topic:=' + side.prefix + '/target',
+                     '_output_topic:=' + side.prefix + '/debug/prediction_image',
+                     '_full_pose:=' + str(side.workspace.prediction_debug).lower()],
+                    self.catalog.root, lambda line, label=side.label: self.log.emit('[Projection '+label+'] '+line)))
+                self.expected.add('/' + name)
         if options.compare:
             left, right = session.sides
             self.pipelines.append(OwnedProcess(
@@ -220,6 +238,16 @@ class SessionController(QObject):
                  '_right_label:=' + right.label + ' (' + right.mode + ')'],
                 self.catalog.root, lambda line: self.log.emit('[Comparison] ' + line)))
             self.expected.add('/ft_gui_comparison')
+            if options.selector:
+                self.pipelines.append(OwnedProcess(
+                    ['rosrun', 'ft_rqt_gui', 'compare_images', '__name:=ft_gui_prediction_comparison',
+                     '_left_topic:=' + left.prefix + '/debug/prediction_image',
+                     '_right_topic:=' + right.prefix + '/debug/prediction_image',
+                     '_left_label:=' + left.label + ' prediction',
+                     '_right_label:=' + right.label + ' prediction',
+                     '_output_topic:=/ft/debug/prediction_comparison_image'],
+                    self.catalog.root, lambda line: self.log.emit('[Prediction comparison] '+line)))
+                self.expected.add('/ft_gui_prediction_comparison')
         if options.rviz:
             self.viewers = Viewers(self.catalog.root, session, self.log.emit)
         self._state('starting', 'Waiting for pipeline nodes to become ready...')

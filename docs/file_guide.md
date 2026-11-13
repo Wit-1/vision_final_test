@@ -25,7 +25,8 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   ├── ft_msgs/                       # 自定义跟踪、目标消息
 │   │   └── msg/
 │   │       ├── Track.msg
-│   │       └── Target.msg
+│   │       ├── Target.msg
+│   │       └── PredictionDebug.msg  # 同次预测的时间、位姿与估计几何
 │   │
 │   ├── ft_detector/                   # 图像接入、两种识别方式、PnP、检测输出
 │   │   ├── include/ft_detector/
@@ -58,24 +59,15 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   │       ├── linear_tracker.cpp     # 滤波、关联、轨迹生命周期、提前量
 │   │       └── tracker_node.cpp       # ROS 输入输出、参数和跟踪 marker
 │   │
-│   ├── ft_selector/                   # 车体旋转估计与未来装甲板选择
-│   │   ├── include/ft_selector/
-│   │   │   ├── rotating_tracker.hpp
-│   │   │   └── target_selector.hpp
-│   │   ├── cfg/
-│   │   │   └── Selector.cfg           # 旋转 Q/R、关联门限和 T
-│   │   └── src/
-│   │       ├── rotating_tracker.cpp   # 车体状态、旋转 EKF、换板关联
-│   │       ├── target_selector.cpp    # 未来可见性、选板和有效性
-│   │       └── selector_node.cpp      # ROS 输入输出及车体、装甲板 marker
-│   │
-│   ├── ft_rqt_gui -> ../bonus/ft_rqt_gui # 附加题包的 catkin 入口
+│   ├── ft_selector -> ../bonus/rotation_prediction/ft_selector
+│   ├── ft_rqt_gui -> ../bonus/gui/ft_rqt_gui # 附加题包的 catkin 入口
 │   └── ft_bringup/                    # 集中管理启动、参数和可视化
 │       ├── launch/
 │       │   ├── demo.launch           # 对外统一启动入口
 │       │   ├── detector.launch
 │       │   ├── tracker.launch
 │       │   ├── selector.launch
+│       │   ├── prediction_overlay.launch # 独立预测投影入口
 │       │   └── visualization.launch
 │       ├── config/
 │       │   ├── detector.yaml         # 传统识别、几何、尺寸和队列参数
@@ -95,33 +87,50 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │           └── vision.rviz
 │
 ├── bonus/
-│   ├── README.md                     # rqt 附加题的使用、结构、AI 辅助和限制
-│   └── ft_rqt_gui/                   # rqt GUI 与 RViz 视角同步插件包
-│       ├── package.xml
-│       ├── CMakeLists.txt
-│       ├── setup.py
-│       ├── plugin.xml
-│       ├── rviz_plugin.xml           # 注册 Orbit 同步面板
-│       ├── launch/side.launch        # 单侧业务链路与话题隔离
-│       ├── scripts/
-│       │   ├── vision_gui            # GUI 和 ROS master 入口
-│       │   ├── workspace_probe       # 在所选环境内检查编译产物和接口
-│       │   └── compare_images        # 同时间戳的两侧图像拼图
-│       └── src/
-│           ├── orbit_sync.hpp        # 视角同步面板接口
-│           ├── orbit_sync.cpp        # Orbit 属性同步与回写抑制
-│           └── ft_rqt_gui/
-│               ├── __init__.py
-│               ├── window.py         # 独立 rqt 配置
-│               ├── plugin.py         # 界面与信号连接
-│               ├── configuration.py  # 素材与单路、双路会话
-│               ├── workspace.py      # 环境与程序、动态库来源检查
-│               ├── session_controller.py # 后台启停与统一回放
-│               ├── processes.py      # 进程所有权与回收
-│               ├── viewers.py        # RViz 配置生成和窗口管理
-│               ├── image_view.py     # 各图源最新帧显示
-│               ├── parameter_view.py # 运行侧、模块与模式过滤，统一 T 控件
-│               └── tuning.py         # 限时动态客户端与 T 更新、回退
+│   ├── README.md                     # 两个附加模块的入口
+│   ├── gui/
+│   │   ├── README.md                 # 为什么做、做了什么、使用方法
+│   │   └── ft_rqt_gui/               # rqt GUI 与 RViz 视角同步插件包
+│   │       ├── package.xml
+│   │       ├── CMakeLists.txt
+│   │       ├── setup.py
+│   │       ├── plugin.xml
+│   │       ├── rviz_plugin.xml       # 注册 Orbit 同步面板
+│   │       ├── launch/side.launch    # 单侧业务链路与话题隔离
+│   │       ├── scripts/
+│   │       │   ├── vision_gui        # GUI 和 ROS master 入口
+│   │       │   ├── workspace_probe   # 所选工作区的编译产物和接口检查
+│   │       │   └── compare_images    # 同时间戳拼图
+│   │       └── src/
+│   │           ├── orbit_sync.hpp
+│   │           ├── orbit_sync.cpp    # 双 RViz 视角同步
+│   │           └── ft_rqt_gui/
+│   │               ├── __init__.py
+│   │               ├── window.py
+│   │               ├── plugin.py    # 界面与信号连接
+│   │               ├── configuration.py # 素材、模式与会话配置
+│   │               ├── workspace.py # 环境与程序来源检查
+│   │               ├── session_controller.py # 后台启停与统一回放
+│   │               ├── processes.py # 进程所有权与回收
+│   │               ├── viewers.py   # RViz 配置与窗口管理
+│   │               ├── image_view.py
+│   │               ├── parameter_view.py
+│   │               └── tuning.py
+│   └── rotation_prediction/
+│       ├── README.md                 # Before、Change、After 与 T 秒后结果
+│       ├── ft_selector/              # 旋转算法包，src 下保留相对链接
+│       │   ├── CMakeLists.txt
+│       │   ├── package.xml
+│       │   ├── cfg/Selector.cfg      # 旋转 Q/R、关联门限和 T
+│       │   ├── include/ft_selector/
+│       │   │   ├── rotating_tracker.hpp
+│       │   │   └── target_selector.hpp
+│       │   └── src/
+│       │       ├── rotating_tracker.cpp # 十一维 EKF 与两组半径、高度
+│       │       ├── target_selector.cpp # 未来选板
+│       │       └── selector_node.cpp # Target、预测元数据和 marker
+│       ├── tools/reproject_predictions.py # 独立预测板投影
+│       └── images/                   # 实际截图及后续观测的对照图
 │
 ├── tools/                            # 开发辅助工具，不参与在线算法
 │   ├── README.md                    # 独立性能工具的构建、参数和统计范围
@@ -158,7 +167,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 - `.hpp` 声明类型和接口，`.cpp` 实现算法；节点文件负责 ROS 通信和组织调用。
 - `ft_bringup` 管理配置与启动；检测、滤波和选板算法放在各自业务包内。
 - 两种检测方式返回相同的 `ArmorCandidate`，随后使用同一个 PnP 和消息发布流程。
-- 辅助工具集中在 tools 和 bonus；自动验证材料使用后清理，不纳入版本管理。
+- 辅助工具集中在 tools 和 bonus；旋转算法位于 bonus/rotation_prediction/ft_selector，通过 src 的相对链接接入。自动验证脚本使用后清理，对照结果作为附加题材料保留。
 
 工作空间与环境约定：
 
@@ -193,7 +202,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [src/ft_detection/README.md](../src/ft_detection/README.md) | 提供者原始消息说明 | 1.2、4.1 |
 | [src/ft_detection/msg/Detection.msg](../src/ft_detection/msg/Detection.msg) | 单块装甲板的字段定义 | 4.1 |
 | [src/ft_detection/msg/DetectionFrame.msg](../src/ft_detection/msg/DetectionFrame.msg) | 图像 header 和整帧检测数组定义 | 4.1、4.2 |
-| [src/ft_msgs/CMakeLists.txt](../src/ft_msgs/CMakeLists.txt) | 生成并导出 Track 和 Target 消息 | 6.2、9.5 |
+| [src/ft_msgs/CMakeLists.txt](../src/ft_msgs/CMakeLists.txt) | 生成 Track、Target 和独立的预测调试消息，原消息保持兼容 | 6.2、9.5 |
 | [src/ft_msgs/package.xml](../src/ft_msgs/package.xml) | 自定义消息包依赖 | 6.2 |
 | [src/ft_msgs/msg/Track.msg](../src/ft_msgs/msg/Track.msg) | 轨迹 ID、命中标志、位置、速度和未来位置 | 6.2、6.5 |
 | [src/ft_detector/CMakeLists.txt](../src/ft_detector/CMakeLists.txt) | 构建算法、消息输出、调参适配、NN 库及检测节点 | 1～5、8.1 |
@@ -219,7 +228,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [src/ft_tracker/src/linear_tracker.cpp](../src/ft_tracker/src/linear_tracker.cpp) | 预测/校正、关联、生命周期和未来位置 | 6.1～6.5 |
 | [src/ft_tracker/src/tracker_node.cpp](../src/ft_tracker/src/tracker_node.cpp) | 读取参数、接收检测并发布 Track 和 marker | 6.2～6.5 |
 | [src/ft_tracker/cfg/Tracker.cfg](../src/ft_tracker/cfg/Tracker.cfg) | 线性跟踪 Q/R、位置关联门限和提前量的动态字段 | 5.2、6.2～6.5 |
-| [src/ft_bringup/CMakeLists.txt](../src/ft_bringup/CMakeLists.txt) | 安装配置、RViz、查看器和 tools 下的 ROS 对比脚本 | 1.4、7.1、10.2 |
+| [src/ft_bringup/CMakeLists.txt](../src/ft_bringup/CMakeLists.txt) | 安装配置、RViz、查看器、对比脚本及 bonus 中的投影工具 | 1.4、7.1、10.2 |
 | [src/ft_bringup/package.xml](../src/ft_bringup/package.xml) | 启动、选板、可视化、话题图、消息同步与独立工具依赖 | 1.4、7.1、9.5、10.2、10.3 |
 | [src/ft_bringup/launch/demo.launch](../src/ft_bringup/launch/demo.launch) | 默认启动检测、跟踪和选板，分别控制各节点与可视化窗口 | 7.1、8.5、9.5、10.1 |
 | [src/ft_bringup/launch/detector.launch](../src/ft_bringup/launch/detector.launch) | 依次加载公共/数据集配置并启动检测节点 | 1.4 |
@@ -240,15 +249,16 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [src/ft_detector/include/ft_detector/nn_detector.hpp](../src/ft_detector/include/ft_detector/nn_detector.hpp) | NN 参数、张量/变换、解码结果及推理接口 | 8.1～8.4 |
 | [src/ft_detector/src/nn_detector.cpp](../src/ft_detector/src/nn_detector.cpp) | ORT Session、RGB/NCHW、坐标反变换、分类/几何筛选和 NMS | 8.1～8.4 |
 | [src/ft_bringup/config/model.yaml](../src/ft_bringup/config/model.yaml) | 模型协议、4 项动态门限和线程参数 | 8.1～8.5 |
-| [src/ft_selector/CMakeLists.txt](../src/ft_selector/CMakeLists.txt) | 构建 Eigen 旋转算法库和 ROS 节点 | 9.3～9.5 |
-| [src/ft_selector/package.xml](../src/ft_selector/package.xml) | 旋转选板包与 ROS、Eigen 依赖 | 9.3～9.5 |
-| [src/ft_selector/include/ft_selector/rotating_tracker.hpp](../src/ft_selector/include/ft_selector/rotating_tracker.hpp) | 圆周模型、观测、八维状态和滤波接口 | 9.1～9.4 |
-| [src/ft_selector/src/rotating_tracker.cpp](../src/ft_selector/src/rotating_tracker.cpp) | 圆周几何、角度环绕、旋转 EKF、换板关联和生命周期 | 9.1～9.4 |
-| [src/ft_selector/include/ft_selector/target_selector.hpp](../src/ft_selector/include/ft_selector/target_selector.hpp) | 选板接口、当前位置和未来位置 | 9.5 |
-| [src/ft_selector/src/target_selector.cpp](../src/ft_selector/src/target_selector.cpp) | 用未来相位和朝向选板，设置目标有效标志 | 9.5 |
-| [src/ft_selector/src/selector_node.cpp](../src/ft_selector/src/selector_node.cpp) | 从检测位姿提取朝向，发布 Target 和 RViz marker | 9.1、9.4、9.5 |
-| [src/ft_selector/cfg/Selector.cfg](../src/ft_selector/cfg/Selector.cfg) | 旋转 EKF 噪声、位置/角度门限和提前量的动态字段 | 5.2、9.3～9.5 |
+| [bonus/rotation_prediction/ft_selector/CMakeLists.txt](../bonus/rotation_prediction/ft_selector/CMakeLists.txt) | 构建 Eigen 旋转算法库和 ROS 节点 | 9.3～9.5 |
+| [bonus/rotation_prediction/ft_selector/package.xml](../bonus/rotation_prediction/ft_selector/package.xml) | 旋转选板包与 ROS、Eigen 依赖 | 9.3～9.5 |
+| [bonus/rotation_prediction/ft_selector/include/ft_selector/rotating_tracker.hpp](../bonus/rotation_prediction/ft_selector/include/ft_selector/rotating_tracker.hpp) | 两组几何、观测、十一维状态、估计不确定性和滤波接口 | 9.1～9.4 |
+| [bonus/rotation_prediction/ft_selector/src/rotating_tracker.cpp](../bonus/rotation_prediction/ft_selector/src/rotating_tracker.cpp) | 圆周几何、角度环绕、旋转 EKF、换板关联和生命周期 | 9.1～9.4 |
+| [bonus/rotation_prediction/ft_selector/include/ft_selector/target_selector.hpp](../bonus/rotation_prediction/ft_selector/include/ft_selector/target_selector.hpp) | 选板接口、当前位置和未来位置 | 9.5 |
+| [bonus/rotation_prediction/ft_selector/src/target_selector.cpp](../bonus/rotation_prediction/ft_selector/src/target_selector.cpp) | 用未来相位和朝向选板，设置目标有效标志 | 9.5 |
+| [bonus/rotation_prediction/ft_selector/src/selector_node.cpp](../bonus/rotation_prediction/ft_selector/src/selector_node.cpp) | 从检测位姿提取朝向，发布 Target 和 RViz marker | 9.1、9.4、9.5 |
+| [bonus/rotation_prediction/ft_selector/cfg/Selector.cfg](../bonus/rotation_prediction/ft_selector/cfg/Selector.cfg) | 旋转 EKF 噪声、位置/角度门限和提前量的动态字段 | 5.2、9.3～9.5 |
 | [src/ft_msgs/msg/Target.msg](../src/ft_msgs/msg/Target.msg) | 车体 ID、有效标志、当前板及未来板位置 | 9.5 |
+| [src/ft_msgs/msg/PredictionDebug.msg](../src/ft_msgs/msg/PredictionDebug.msg) | 源时间、预测时间、实际 T、板位姿、尺寸和半径/高度差估计 | 9.5、附加改进 |
 | [src/ft_bringup/config/selector.yaml](../src/ft_bringup/config/selector.yaml) | 圆周半径、槽位、EKF 噪声、关联和选板参数 | 9.1～9.5 |
 | [src/ft_bringup/launch/selector.launch](../src/ft_bringup/launch/selector.launch) | 启动选板并读取与单板跟踪相同的提前量 | 9.5 |
 | [tools/CMakeLists.txt](../tools/CMakeLists.txt) | 链接现有算法库，独立构建性能基准 | 10.2 |
@@ -257,36 +267,50 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [tools/summarize_timings.py](../tools/summarize_timings.py) | 按数据集和模式计算平均值、最近秩 P95 和样本数 | 10.2 |
 | [tools/compare_detections.py](../tools/compare_detections.py) | 按时间戳与坐标系同步两路调试图并拼接 | 8.5、10.2 |
 | [tools/compare_predictions.py](../tools/compare_predictions.py) | 同步 Track/Target 并发布预测端点对照灰线 | 9.5、10.2 |
+| [bonus/rotation_prediction/tools/reproject_predictions.py](../bonus/rotation_prediction/tools/reproject_predictions.py) | 以相机标定投影四端点，精确匹配源图像，独立绘图与范围检查 | 9.5、附加改进 |
+| [src/ft_bringup/launch/prediction_overlay.launch](../src/ft_bringup/launch/prediction_overlay.launch) | 设置投影输入输出和旧版中心点兼容方式 | 9.5、附加改进 |
 | [tools/comparison.launch](../tools/comparison.launch) | 启动正式链路与辅助检测；跟踪和选板可分别关闭，两路均开启时才运行预测对照 | 10.2、附加题 |
 
 ## 附加题 GUI 文件
 
 | 文件 | 用途 |
 |---|---|
-| [bonus/README.md](../bonus/README.md) | 工具目标、操作、调用关系、AI 辅助与限制 |
+| [bonus/README.md](../bonus/README.md) | 两个附加模块的说明入口 |
+| [bonus/gui/README.md](../bonus/gui/README.md) | GUI 目标、操作、调用关系、AI 辅助与限制 |
 | [src/ft_rqt_gui](../src/ft_rqt_gui) | 指向 bonus 包的相对符号链接，仅用于 catkin 包发现 |
-| [package.xml](../bonus/ft_rqt_gui/package.xml) | GUI、ROS、调参依赖及插件导出 |
-| [CMakeLists.txt](../bonus/ft_rqt_gui/CMakeLists.txt) | 安装 Python 模块与入口，构建并注册 Orbit 插件 |
-| [setup.py](../bonus/ft_rqt_gui/setup.py) | catkin 的 Python 包声明 |
-| [plugin.xml](../bonus/ft_rqt_gui/plugin.xml) | 注册 rqt 插件名称和 Python 类 |
-| [scripts/vision_gui](../bonus/ft_rqt_gui/scripts/vision_gui) | 管理单个控制台窗口及自己创建的 ROS master |
-| [window.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/window.py) | 使用独立 rqt 配置加载控制台 |
-| [plugin.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/plugin.py) | 界面布局、选项收集、状态及日志显示 |
-| [configuration.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/configuration.py) | 读取现有 YAML，验证素材、模型和回放范围 |
-| [session_controller.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/session_controller.py) | 后台串行处理启停、切换、暂停和节点监控 |
-| [processes.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/processes.py) | 限时 master 调用与按进程身份执行的回收 |
-| [image_view.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/image_view.py) | 原图、检测结果或对比图的最新帧显示 |
-| [parameter_view.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/parameter_view.py) | 切换运行侧与模块，过滤无关字段，提供统一提前量控件 |
-| [tuning.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/tuning.py) | 固定服务连接并限制调用时间，检查 T 更新回执及失败回退 |
-| [__init__.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/__init__.py) | Python 模块包入口 |
+| [package.xml](../bonus/gui/ft_rqt_gui/package.xml) | GUI、ROS、调参依赖及插件导出 |
+| [CMakeLists.txt](../bonus/gui/ft_rqt_gui/CMakeLists.txt) | 安装 Python 模块与入口，构建并注册 Orbit 插件 |
+| [setup.py](../bonus/gui/ft_rqt_gui/setup.py) | catkin 的 Python 包声明 |
+| [plugin.xml](../bonus/gui/ft_rqt_gui/plugin.xml) | 注册 rqt 插件名称和 Python 类 |
+| [scripts/vision_gui](../bonus/gui/ft_rqt_gui/scripts/vision_gui) | 管理单个控制台窗口及自己创建的 ROS master |
+| [window.py](../bonus/gui/ft_rqt_gui/src/ft_rqt_gui/window.py) | 使用独立 rqt 配置加载控制台 |
+| [plugin.py](../bonus/gui/ft_rqt_gui/src/ft_rqt_gui/plugin.py) | 界面布局、选项收集、状态及日志显示 |
+| [configuration.py](../bonus/gui/ft_rqt_gui/src/ft_rqt_gui/configuration.py) | 读取现有 YAML，验证素材、模型和回放范围 |
+| [session_controller.py](../bonus/gui/ft_rqt_gui/src/ft_rqt_gui/session_controller.py) | 后台串行处理启停、切换、暂停和节点监控 |
+| [processes.py](../bonus/gui/ft_rqt_gui/src/ft_rqt_gui/processes.py) | 限时 master 调用与按进程身份执行的回收 |
+| [image_view.py](../bonus/gui/ft_rqt_gui/src/ft_rqt_gui/image_view.py) | 原图、检测结果或对比图的最新帧显示 |
+| [parameter_view.py](../bonus/gui/ft_rqt_gui/src/ft_rqt_gui/parameter_view.py) | 切换运行侧与模块，过滤无关字段，提供统一提前量控件 |
+| [tuning.py](../bonus/gui/ft_rqt_gui/src/ft_rqt_gui/tuning.py) | 固定服务连接并限制调用时间，检查 T 更新回执及失败回退 |
+| [__init__.py](../bonus/gui/ft_rqt_gui/src/ft_rqt_gui/__init__.py) | Python 模块包入口 |
 | [gui_control_panel.png](images/gui_control_panel.png) | 真实控制台与同帧对比截图 |
 | [gui_parameters.png](images/gui_parameters.png) | 真实控制台内的参数编辑截图 |
-| [workspace.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/workspace.py) | 单独加载工作区环境，核实程序及项目动态库的实际来源 |
-| [workspace_probe](../bonus/ft_rqt_gui/scripts/workspace_probe) | 在对应环境中检查包路径、模型、节点程序和消息接口 |
-| [side.launch](../bonus/ft_rqt_gui/launch/side.launch) | 加载原有业务节点并隔离两侧输入输出与 TF |
-| [compare_images](../bonus/ft_rqt_gui/scripts/compare_images) | 同时间戳匹配两侧图像，添加标签并拼接 |
-| [viewers.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/viewers.py) | 根据 CameraInfo 创建临时 RViz 配置并管理窗口 |
-| [orbit_sync.hpp](../bonus/ft_rqt_gui/src/orbit_sync.hpp) | 视角同步面板的声明与状态 |
-| [orbit_sync.cpp](../bonus/ft_rqt_gui/src/orbit_sync.cpp) | 双向同步 Orbit 的角度、距离、焦点，暂停时仍运行 |
-| [rviz_plugin.xml](../bonus/ft_rqt_gui/rviz_plugin.xml) | 向 RViz 注册 OrbitSync 面板 |
+| [workspace.py](../bonus/gui/ft_rqt_gui/src/ft_rqt_gui/workspace.py) | 单独加载工作区环境，核实程序及项目动态库的实际来源 |
+| [workspace_probe](../bonus/gui/ft_rqt_gui/scripts/workspace_probe) | 在对应环境中检查包路径、模型、节点程序和消息接口 |
+| [side.launch](../bonus/gui/ft_rqt_gui/launch/side.launch) | 加载原有业务节点并隔离两侧输入输出与 TF |
+| [compare_images](../bonus/gui/ft_rqt_gui/scripts/compare_images) | 同时间戳匹配两侧图像，添加标签并拼接 |
+| [viewers.py](../bonus/gui/ft_rqt_gui/src/ft_rqt_gui/viewers.py) | 根据 CameraInfo 创建临时 RViz 配置并管理窗口 |
+| [orbit_sync.hpp](../bonus/gui/ft_rqt_gui/src/orbit_sync.hpp) | 视角同步面板的声明与状态 |
+| [orbit_sync.cpp](../bonus/gui/ft_rqt_gui/src/orbit_sync.cpp) | 双向同步 Orbit 的角度、距离、焦点，暂停时仍运行 |
+| [rviz_plugin.xml](../bonus/gui/ft_rqt_gui/rviz_plugin.xml) | 向 RViz 注册 OrbitSync 面板 |
 | [gui_rviz_comparison.png](images/gui_rviz_comparison.png) | Baseline 与 Candidate 的真实双 RViz 截图 |
+
+
+## 旋转预测附加题材料
+
+| 文件或目录 | 用途 |
+|---|---|
+| [bonus/rotation_prediction/README.md](../bonus/rotation_prediction/README.md) | Before / Change / After、实际观察、测量方法与限制 |
+| [src/ft_selector](../src/ft_selector) | 指向附加题旋转算法包的 catkin 入口，保持原包名 |
+| [prediction_overlay.png](../bonus/rotation_prediction/images/prediction_overlay.png) | 当前模型板与未来板的真实 GUI 截图 |
+| [red_1_3_workspace_comparison.png](../bonus/rotation_prediction/images/red_1_3_workspace_comparison.png) | 本人提供的录屏截图，展示两组板高度差的视觉改善 |
+| [images/](../bonus/rotation_prediction/images/) | red_1_3、blue_1 的 T 秒后对照图，及 blue_guard 的运动相机失败样本 |

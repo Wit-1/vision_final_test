@@ -30,23 +30,29 @@ SelectedTarget selectTarget(const VehicleEstimate& vehicle, const CircleModel& c
                             double horizon_s, double min_facing_cosine) {
   SelectedTarget target;
   if (!vehicle.id) return target;
+  // 兼容原调用接口，但运行时优先使用滤波器输出的估计几何。
+  const CircleModel& estimated = vehicle.geometry.plate_count ? vehicle.geometry : circle;
 
   target.id = vehicle.id;
   target.center = vehicle.center;
   // 有观测时当前板取匹配槽位，短漏检时可用几何朝向选择显示槽位。
   int current_slot = vehicle.observed_slot;
   if (!vehicle.observed) {
-    const int visible = mostFacingSlot(vehicle.center, vehicle.phase, circle, min_facing_cosine);
+    const int visible = mostFacingSlot(vehicle.center, vehicle.phase, estimated, min_facing_cosine);
     if (visible >= 0) current_slot = visible;
   }
-  target.current = circle.platePosition(vehicle.center, vehicle.phase, current_slot);
+  target.current_slot = current_slot;
+  target.current_phase = estimated.platePhase(vehicle.phase, current_slot);
+  target.current = estimated.platePosition(vehicle.center, vehicle.phase, current_slot);
   // 同时外推车体平移和旋转，再重新选未来槽位，允许切换到另一块板。
   const Eigen::Vector3d future_center = vehicle.center + horizon_s * vehicle.velocity;
   const double future_phase = wrapAngle(vehicle.phase + horizon_s * vehicle.omega);
-  const int future_slot = mostFacingSlot(future_center, future_phase, circle, min_facing_cosine);
+  const int future_slot = mostFacingSlot(future_center, future_phase, estimated, min_facing_cosine);
   if (future_slot >= 0) {
     // 预测存在不等于本帧有效：valid 还要求当前观测命中且当前板深度为正。
-    target.predicted = circle.platePosition(future_center, future_phase, future_slot);
+    target.predicted_slot = future_slot;
+    target.predicted_phase = estimated.platePhase(future_phase, future_slot);
+    target.predicted = estimated.platePosition(future_center, future_phase, future_slot);
     target.has_prediction = true;
     target.valid = vehicle.observed && target.current.z() > 0.0;
   }

@@ -17,6 +17,7 @@
 
   <include if="$(arg tracker)" file="$(find ft_bringup)/launch/tracker.launch" />
   <include if="$(arg selector)" file="$(find ft_bringup)/launch/selector.launch" />
+  <include if="$(arg selector)" file="$(find ft_bringup)/launch/prediction_overlay.launch" />
 
   <include file="$(find ft_bringup)/launch/visualization.launch">
     <arg name="gui" value="$(arg gui)" />
