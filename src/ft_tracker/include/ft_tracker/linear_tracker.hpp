@@ -20,6 +20,12 @@ struct TrackerParams {
   bool match_color, match_size;
 };
 
+// 在线只修改噪声、关联门限与提前量，不触碰初始化和生命周期配置。
+struct LinearTuning {
+  double process_noise_density, measurement_noise_variance;
+  double association_distance_m, prediction_time_s;
+};
+
 struct Observation {
   std::uint32_t detection_id = 0;  // Frame-local; never used as a track identity.
   bool is_red = false, is_large = false;
@@ -37,6 +43,7 @@ struct TrackState {
 class LinearTracker {
  public:
   explicit LinearTracker(const TrackerParams& params);
+  void setTuning(const LinearTuning& tuning);
   TrackState update(double image_stamp_s, const std::vector<Observation>& observations);
   void reset();  // Preserve the ID counter, including after a time/frame change.
 

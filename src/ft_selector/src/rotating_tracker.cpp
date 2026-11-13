@@ -59,6 +59,21 @@ RotatingTracker::RotatingTracker(RotatingParams params) : params_(params) {
     throw std::invalid_argument("Invalid rotating tracker parameters or overlapping yaw gates");
 }
 
+// 校验六项在线字段后统一应用，当前车体估计与协方差保持不变。
+void RotatingTracker::setTuning(const RotatingTuning& tuning) {
+  if (!positive(tuning.linear_noise_density) || !positive(tuning.angular_noise_density) ||
+      !positive(tuning.position_variance) || !positive(tuning.yaw_variance) ||
+      !positive(tuning.position_gate_m) || !positive(tuning.yaw_gate_rad) ||
+      tuning.yaw_gate_rad >= kPi / params_.circle.plate_count)
+    throw std::invalid_argument("Invalid rotating tuning or overlapping yaw gates");
+  params_.linear_noise_density = tuning.linear_noise_density;
+  params_.angular_noise_density = tuning.angular_noise_density;
+  params_.position_variance = tuning.position_variance;
+  params_.yaw_variance = tuning.yaw_variance;
+  params_.position_gate_m = tuning.position_gate_m;
+  params_.yaw_gate_rad = tuning.yaw_gate_rad;
+}
+
 // 结束当前车体轨迹，下一次观测建立新 ID。
 void RotatingTracker::reset() {
   id_ = 0;

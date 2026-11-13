@@ -5,8 +5,10 @@
 #include <string>
 #include <vector>
 
+#include <dynamic_reconfigure/server.h>
 #include <ft_detection/DetectionFrame.h>
 #include <ft_msgs/Track.h>
+#include <ft_tracker/TrackerConfig.h>
 #include <ros/ros.h>
 #include <visualization_msgs/Marker.h>
 
@@ -45,6 +47,7 @@ class TrackerNode {
     track_publisher_ = nh_.advertise<ft_msgs::Track>(output, output_queue);
     marker_publisher_ = nh_.advertise<visualization_msgs::Marker>(marker, marker_queue);
     subscriber_ = nh_.subscribe(input, input_queue, &TrackerNode::receive, this);
+    initializeTuning(params);
     ROS_INFO_STREAM("Tracker: " << input << " -> " << output << ", marker=" << marker);
   }
 
@@ -55,6 +58,33 @@ class TrackerNode {
     if (!private_nh_.getParam(name, value))
       throw std::invalid_argument("Missing or wrongly typed parameter: " + private_nh_.resolveName(name));
     return value;
+  }
+
+  // 从启动配置设置动态默认值；在线更新只替换四项字段，不重新创建滤波器。
+  void initializeTuning(const ft_tracker::TrackerParams& params) {
+    active_tuning_.process_noise_density = params.process_noise_density;
+    active_tuning_.measurement_noise_variance = params.measurement_noise_variance;
+    active_tuning_.association_distance_m = params.association_distance_m;
+    active_tuning_.prediction_time_s = params.prediction_time_s;
+    auto clamped = active_tuning_;
+    clamped.__clamp__();
+    if (active_tuning_.__level__(clamped) != 0)
+      throw std::invalid_argument("Tracker YAML tuning is outside the UI range");
+    const ros::NodeHandle tuning_nh(private_nh_, "tuning");
+    tuning_server_.reset(new TuningServer(tuning_mutex_, tuning_nh));
+    tuning_server_->updateConfig(active_tuning_);
+    tuning_server_->setConfigDefault(active_tuning_);
+    tuning_server_->setCallback([this](ft_tracker::TrackerConfig& config, std::uint32_t) {
+      try {
+        tracker_->setTuning({config.process_noise_density, config.measurement_noise_variance,
+                             config.association_distance_m, config.prediction_time_s});
+        active_tuning_ = config;
+      } catch (const std::invalid_argument& error) {
+        config = active_tuning_;
+        ROS_WARN_STREAM("Linear tuning rejected; previous configuration retained: " << error.what());
+      }
+    });
+    ROS_INFO_STREAM("Dynamic linear tuning: " << tuning_nh.getNamespace());
   }
 
   // 显示当前点、未来点和连线；无轨迹时发送 DELETE 清除旧标记。
@@ -142,6 +172,10 @@ class TrackerNode {
   ros::Subscriber subscriber_;
   ros::Publisher track_publisher_, marker_publisher_;
   std::unique_ptr<ft_tracker::LinearTracker> tracker_;
+  using TuningServer = dynamic_reconfigure::Server<ft_tracker::TrackerConfig>;
+  ft_tracker::TrackerConfig active_tuning_;
+  boost::recursive_mutex tuning_mutex_;
+  std::unique_ptr<TuningServer> tuning_server_;
   std::string frame_;
   double marker_diameter_m_, marker_lifetime_s_;
 };

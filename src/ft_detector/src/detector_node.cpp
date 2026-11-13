@@ -216,10 +216,11 @@ class DetectorNode {
         auto next_nn = nn_params_;
         next_nn.thresholds = {config.nn_min_color_score, config.nn_min_number_score,
                               config.nn_min_confidence, config.nn_nms_iou};
+        next_nn.large_armor_min_spacing_ratio = config.large_armor_min_spacing_ratio;
         ft_detector::NnDetector::validateParams(next_nn);
         const bool changed = active_tuning_.__level__(config) != 0;
         detector_->setParams(next);  // Validates the complete combination before changing the algorithm.
-        if (nn_detector_) nn_detector_->setThresholds(next_nn.thresholds);
+        if (nn_detector_) nn_detector_->setThresholds(next_nn.thresholds, next_nn.large_armor_min_spacing_ratio);
         nn_params_ = next_nn;
         traditional_params_ = next;
         active_tuning_ = config;

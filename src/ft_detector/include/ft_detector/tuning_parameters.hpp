@@ -6,7 +6,7 @@
 
 namespace ft_detector {
 
-// Convert runtime fields; all unexposed geometry fields stay in the startup parameter set.
+// Convert the complete traditional runtime configuration without changing YAML layout.
 DetectorConfig tuningFromParams(const TraditionalParams& params);
 TraditionalParams paramsWithTuning(const TraditionalParams& current, const DetectorConfig& tuning);
 

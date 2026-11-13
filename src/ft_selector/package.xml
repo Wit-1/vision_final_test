@@ -8,6 +8,7 @@
   <buildtool_depend>catkin</buildtool_depend>
   <depend>eigen</depend>
   <depend>roscpp</depend>
+  <depend>dynamic_reconfigure</depend>
   <depend>ft_detection</depend>
   <depend>ft_msgs</depend>
   <depend>geometry_msgs</depend>

@@ -1,12 +1,15 @@
 #include <cmath>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include <Eigen/Geometry>
+#include <dynamic_reconfigure/server.h>
 #include <ft_detection/DetectionFrame.h>
 #include <ft_msgs/Target.h>
+#include <ft_selector/SelectorConfig.h>
 #include <ros/ros.h>
 #include <std_msgs/Header.h>
 #include <visualization_msgs/MarkerArray.h>
@@ -57,6 +60,7 @@ class SelectorNode {
     target_pub_ = nh_.advertise<ft_msgs::Target>(target, queue);
     marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>(markers, queue);
     detection_sub_ = nh_.subscribe(detection, queue, &SelectorNode::receiveDetections, this);
+    initializeTuning();
     ROS_INFO_STREAM("Selector: " << detection << " -> " << target << ", radius="
                     << params_.circle.radius_m << " m, plates=" << params_.circle.plate_count
                     << ", T=" << horizon_s_ << " s");
@@ -87,6 +91,40 @@ class SelectorNode {
     params.initial_velocity_variance = required<double>("initial_velocity_variance");
     params.initial_omega_variance = required<double>("initial_omega_variance");
     return params;
+  }
+
+  // 旋转调参使用启动 YAML 的默认值，T 仍从原有 linear 配置读取。
+  void initializeTuning() {
+    active_tuning_.linear_noise_density = params_.linear_noise_density;
+    active_tuning_.angular_noise_density = params_.angular_noise_density;
+    active_tuning_.position_variance = params_.position_variance;
+    active_tuning_.yaw_variance = params_.yaw_variance;
+    active_tuning_.association_position_m = params_.position_gate_m;
+    active_tuning_.association_yaw_rad = params_.yaw_gate_rad;
+    active_tuning_.prediction_time_s = horizon_s_;
+    auto clamped = active_tuning_;
+    clamped.__clamp__();
+    if (active_tuning_.__level__(clamped) != 0)
+      throw std::invalid_argument("Selector YAML tuning is outside the UI range");
+    const ros::NodeHandle tuning_nh(private_nh_, "tuning");
+    tuning_server_.reset(new TuningServer(tuning_mutex_, tuning_nh));
+    tuning_server_->updateConfig(active_tuning_);
+    tuning_server_->setConfigDefault(active_tuning_);
+    tuning_server_->setCallback([this](ft_selector::SelectorConfig& config, std::uint32_t) {
+      try {
+        if (!std::isfinite(config.prediction_time_s) || config.prediction_time_s < 0.0)
+          throw std::invalid_argument("Prediction horizon must be finite and nonnegative");
+        tracker_.setTuning({config.linear_noise_density, config.angular_noise_density,
+                           config.position_variance, config.yaw_variance,
+                           config.association_position_m, config.association_yaw_rad});
+        horizon_s_ = config.prediction_time_s;
+        active_tuning_ = config;
+      } catch (const std::invalid_argument& error) {
+        config = active_tuning_;
+        ROS_WARN_STREAM("Rotating tuning rejected; previous configuration retained: " << error.what());
+      }
+    });
+    ROS_INFO_STREAM("Dynamic rotating tuning: " << tuning_nh.getNamespace());
   }
 
   // 从检测 Pose 提取板中心和水平法向角，形成旋转滤波的观测。
@@ -189,6 +227,10 @@ class SelectorNode {
   ros::NodeHandle nh_, private_nh_;
   ft_selector::RotatingParams params_;
   ft_selector::RotatingTracker tracker_;
+  using TuningServer = dynamic_reconfigure::Server<ft_selector::SelectorConfig>;
+  ft_selector::SelectorConfig active_tuning_;
+  boost::recursive_mutex tuning_mutex_;
+  std::unique_ptr<TuningServer> tuning_server_;
   ros::Subscriber detection_sub_;
   ros::Publisher target_pub_, marker_pub_;
   std_msgs::Header last_header_;

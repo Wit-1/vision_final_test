@@ -219,12 +219,13 @@ NnDetector::NnDetector(const NnParams& params) : params_(params) {
 // 在 Impl 类型完整的实现文件中释放推理资源。
 NnDetector::~NnDetector() = default;
 
-// 校验新阈值后更新筛选配置，无需重新加载模型。
-void NnDetector::setThresholds(const NnThresholds& thresholds) {
+// 校验并更新分数、去重与大小板门限，无需重新加载模型。
+void NnDetector::setThresholds(const NnThresholds& thresholds, double large_armor_min_spacing_ratio) {
   auto next = params_;
   next.thresholds = thresholds;
+  next.large_armor_min_spacing_ratio = large_armor_min_spacing_ratio;
   validateParams(next);
-  params_.thresholds = thresholds;
+  params_ = next;
 }
 
 // 单帧推理入口：预处理、运行 Session、检查输出并解码候选。

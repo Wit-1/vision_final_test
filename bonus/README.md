@@ -28,7 +28,17 @@
 
 ![工作区选择与 Baseline／Candidate 同帧对比](../docs/images/gui_control_panel.png)
 
-`Parameters` 页复用 rqt_reconfigure 的编辑控件，可以分别选择左右检测节点。修改只作用于所选节点，不自动写回 YAML。
+`Parameters` 页先选择运行侧，再通过 `Detection`、`Linear tracking`、`Rotating tracking` 切换模块。关闭的业务模块不显示。检测页按该侧实际模式过滤字段，Traditional 显示 HSV 和几何筛选，NN 显示分数、NMS 与大小板分界，避免调到当前模式没有使用的参数。
+
+| 模块 | 在线调整内容 |
+|---|---|
+| Detection | 传统颜色与灯条几何、NN 四项筛选阈值、共用的大小板分界 |
+| Linear tracking | Q 噪声密度、R 位置方差、位置关联门限 |
+| Rotating tracking | 平移与角运动噪声、位置与角度观测方差、位置与角度关联门限 |
+
+上方的 `Prediction horizon T` 统一修改所选侧已开启的线性和旋转预测，完成输入后生效；`Reset T` 恢复该侧启动 YAML 中的提前量。T 更新失败时尝试恢复旧值，无法确认恢复时提示重启。两种滤波器调整 Q/R 和关联门限时保留当前轨迹与 ID。
+
+参数编辑继续复用 rqt_reconfigure 控件，不自动写回 YAML，重启后重新加载配置。bag 暂停时也能改参数，收到下一张图像后才能看到画面变化。旧 Baseline 可以继续运行和调整原有检测字段；没有提供在线服务的模块会显示说明，无法完整联动时禁用 T 控件。
 
 ![左右节点选择与动态参数编辑器](../docs/images/gui_parameters.png)
 
@@ -82,7 +92,7 @@ GUI 和 RViz 需要可用的图形环境。完整依赖见 [package.xml](ft_rqt_
 1. 选择 `Dataset` 和 `Primary mode`。默认 blue_1、Traditional、0.2 倍、0 秒起点、不循环，跟踪与选板均开启。
 2. 选择 `Comparison`。使用 Workspaces 时，填写已构建的 Baseline、Candidate 工作区目录。
 3. 设置倍率、起点和循环。需要单窗 RViz 时勾选 `Open RViz`；需要双窗联动时勾选 `Compare in RViz`，它会自动开启 Open RViz。
-4. 点击 `Start`，在 Images 页切换图源，在 Parameters 页选择要调整的节点。默认调参对象为正式模式或 Candidate。
+4. 点击 `Start`，在 Images 页切换图源，在 Parameters 页选择运行侧和模块。默认调参对象为正式模式或 Candidate；调整传统检测时选择 Traditional 侧，与主运行模式无关。
 5. 使用 `Pause` / `Resume` 暂停或继续。修改运行配置后，点击 `Apply / Restart` 从设定起点重启；在线参数修改则即时生效，重启后恢复各自的 YAML 配置。
 6. 点击 `Stop` 结束会话。非循环回放结束后保留最后画面和业务节点；关闭 GUI 或手动关闭任一 RViz 窗口，也会回收本次会话。停止和关闭时会等待自有进程退出。
 

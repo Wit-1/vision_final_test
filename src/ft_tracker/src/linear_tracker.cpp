@@ -36,6 +36,21 @@ LinearTracker::LinearTracker(const TrackerParams& params) : params_(params), fil
   for (int axis = 0; axis < 3; ++axis) filter_.measurementMatrix.at<double>(axis, axis) = 1.0;
 }
 
+// 在线替换 Q/R、关联门限和 T，保留状态、协方差以及轨迹身份。
+void LinearTracker::setTuning(const LinearTuning& tuning) {
+  const double positive[] = {tuning.process_noise_density, tuning.measurement_noise_variance,
+                            tuning.association_distance_m};
+  if (!std::all_of(std::begin(positive), std::end(positive),
+                   [](double value) { return std::isfinite(value) && value > 0.0; }) ||
+      !std::isfinite(tuning.prediction_time_s) || tuning.prediction_time_s < 0.0)
+    throw std::invalid_argument("Linear tuning requires positive noise/gate and nonnegative T");
+  params_.process_noise_density = tuning.process_noise_density;
+  params_.measurement_noise_variance = tuning.measurement_noise_variance;
+  params_.association_distance_m = tuning.association_distance_m;
+  params_.prediction_time_s = tuning.prediction_time_s;
+  cv::setIdentity(filter_.measurementNoiseCov, cv::Scalar(tuning.measurement_noise_variance));
+}
+
 // 删除当前轨迹，保留 ID 计数器以避免重新捕获时复用旧 ID。
 void LinearTracker::reset() {
   active_ = false;

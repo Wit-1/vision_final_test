@@ -1,12 +1,13 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(ft_tracker)
 
-find_package(catkin REQUIRED COMPONENTS roscpp ft_detection ft_msgs geometry_msgs visualization_msgs)
+find_package(catkin REQUIRED COMPONENTS roscpp ft_detection ft_msgs geometry_msgs visualization_msgs dynamic_reconfigure)
 find_package(OpenCV 4 REQUIRED COMPONENTS core video)
+generate_dynamic_reconfigure_options(cfg/Tracker.cfg)
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES ft_tracker_core
-  CATKIN_DEPENDS roscpp ft_detection ft_msgs geometry_msgs visualization_msgs
+  CATKIN_DEPENDS roscpp ft_detection ft_msgs geometry_msgs visualization_msgs dynamic_reconfigure
   DEPENDS OpenCV
 )
 
@@ -19,7 +20,7 @@ target_link_libraries(ft_tracker_core ${OpenCV_LIBRARIES})
 add_executable(ft_tracker_node src/tracker_node.cpp)
 target_compile_options(ft_tracker_node PRIVATE -Wall -Wextra)
 target_include_directories(ft_tracker_node PRIVATE ${catkin_INCLUDE_DIRS})
-add_dependencies(ft_tracker_node ${catkin_EXPORTED_TARGETS})
+add_dependencies(ft_tracker_node ${PROJECT_NAME}_gencfg ${catkin_EXPORTED_TARGETS})
 target_link_libraries(ft_tracker_node ft_tracker_core ${catkin_LIBRARIES})
 
 install(TARGETS ft_tracker_core ft_tracker_node

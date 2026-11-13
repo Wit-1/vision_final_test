@@ -168,11 +168,13 @@ source devel/setup.bash
 rosrun rqt_reconfigure rqt_reconfigure
 ```
 
-选择 `/ft_detector/tuning`：传统模式有 21 项 HSV/几何字段，神经网络有颜色分数、编号分数、联合分数和 NMS IoU 共 4 项。滑块释放后生效；不合法组合整组恢复上一次有效配置。当前值及“Set to Default”来自启动 YAML，在线修改不会写回文件。其他参数（含跟踪 Q/R、关联门限和 T）修改 YAML 后重启。
+选择 `/ft_detector/tuning`：传统检测有 33 项 HSV/几何字段；NN 使用颜色分数、编号分数、联合分数、NMS IoU，以及共用的大小板分界。`/ft_tracker/tuning` 提供 Q/R、位置关联门限和 T；`/ft_selector/tuning` 提供旋转 EKF 的噪声、观测方差、位置/角度关联门限和 T。修改 Q/R、门限和 T 时保留当前轨迹。
+
+滑块释放后生效；不合法组合整组恢复上一次有效配置。当前值及“Set to Default”来自启动 YAML，在线修改不会写回文件。GUI 按运行侧、模式和模块过滤参数，并用一个 T 控件联动所选侧的两种预测；单独使用 rqt_reconfigure 时，各节点的 T 分别设置。半径、板数、物理尺寸及其他未开放参数仍修改 YAML 后重启。
 
 调参对照：在 blue_1 的同一帧中，将 blue_v_min 从 130 提高到 240，蓝色掩膜白像素从 2795 减少到 1686，检测数从 2 变为 0；恢复为 130 后结果恢复。提高亮度下限会收紧筛选，也可能漏掉原来能识别的目标。
 
-参数窗口选中 `/ft_detector/tuning` 后，可看到在线字段及其滑块。下图显示启动 YAML 加载后的当前值，包含 21 项传统字段和 4 项 NN 字段。
+参数窗口选中 `/ft_detector/tuning` 后可看到检测字段及其滑块。标准 rqt_reconfigure 显示完整服务字段，本项目 GUI 则隐藏当前模式不使用的字段。
 
 ![rqt_reconfigure 中的检测参数滑块](docs/images/tuning_rqt_reconfigure.png)
 

@@ -45,7 +45,7 @@ class NnDetector {
   NnDetector(const NnDetector&) = delete;
   NnDetector& operator=(const NnDetector&) = delete;
   static void validateParams(const NnParams& params);
-  void setThresholds(const NnThresholds& thresholds);
+  void setThresholds(const NnThresholds& thresholds, double large_armor_min_spacing_ratio);
   std::vector<ArmorCandidate> detect(const cv::Mat& bgr);
   static std::string backendVersion();
 

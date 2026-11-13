@@ -43,7 +43,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   │   │   ├── pnp_solver.cpp
 │   │   │   ├── pose_history.cpp       # 双解消歧所用历史的匹配与失效清理
 │   │   │   ├── detection_output.cpp   # 字段检查、共享四元数与消息构造
-│   │   │   ├── tuning_parameters.cpp  # 保留静态字段、转换 21 项在线参数
+│   │   │   ├── tuning_parameters.cpp  # 转换传统颜色与几何在线参数
 │   │   │   ├── debug_draw.cpp
 │   │   │   └── nn_detector.cpp
 │   │   └── cfg/
@@ -52,6 +52,8 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   ├── ft_tracker/                    # 单装甲板匀速跟踪
 │   │   ├── include/ft_tracker/
 │   │   │   └── linear_tracker.hpp
+│   │   ├── cfg/
+│   │   │   └── Tracker.cfg            # 线性 Q/R、关联门限和 T
 │   │   └── src/
 │   │       ├── linear_tracker.cpp     # 滤波、关联、轨迹生命周期、提前量
 │   │       └── tracker_node.cpp       # ROS 输入输出、参数和跟踪 marker
@@ -60,6 +62,8 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   │   ├── include/ft_selector/
 │   │   │   ├── rotating_tracker.hpp
 │   │   │   └── target_selector.hpp
+│   │   ├── cfg/
+│   │   │   └── Selector.cfg           # 旋转 Q/R、关联门限和 T
 │   │   └── src/
 │   │       ├── rotating_tracker.cpp   # 车体状态、旋转 EKF、换板关联
 │   │       ├── target_selector.cpp    # 未来可见性、选板和有效性
@@ -116,7 +120,8 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │               ├── processes.py      # 进程所有权与回收
 │               ├── viewers.py        # RViz 配置生成和窗口管理
 │               ├── image_view.py     # 各图源最新帧显示
-│               └── parameter_view.py # 选择左右节点并复用参数编辑器
+│               ├── parameter_view.py # 运行侧、模块与模式过滤，统一 T 控件
+│               └── tuning.py         # 限时动态客户端与 T 更新、回退
 │
 ├── tools/                            # 开发辅助工具，不参与在线算法
 │   ├── README.md                    # 独立性能工具的构建、参数和统计范围
@@ -193,7 +198,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [src/ft_msgs/msg/Track.msg](../src/ft_msgs/msg/Track.msg) | 轨迹 ID、命中标志、位置、速度和未来位置 | 6.2、6.5 |
 | [src/ft_detector/CMakeLists.txt](../src/ft_detector/CMakeLists.txt) | 构建算法、消息输出、调参适配、NN 库及检测节点 | 1～5、8.1 |
 | [src/ft_detector/package.xml](../src/ft_detector/package.xml) | 检测节点、图像插件及推理资源准备依赖 | 1～5、8.1 |
-| [src/ft_detector/cfg/Detector.cfg](../src/ft_detector/cfg/Detector.cfg) | 声明 21 项传统及 4 项 NN 在线字段、范围和默认值 | 5.2、5.3 |
+| [src/ft_detector/cfg/Detector.cfg](../src/ft_detector/cfg/Detector.cfg) | 声明 33 项传统字段及 4 项 NN 筛选字段，大小板分界供两种模式共用 | 5.2、5.3 |
 | [src/ft_detector/include/ft_detector/armor_candidate.hpp](../src/ft_detector/include/ft_detector/armor_candidate.hpp) | 共用二维候选、四点与帧内 ID 类型 | 2.3、2.4 |
 | [src/ft_detector/include/ft_detector/traditional_detector.hpp](../src/ft_detector/include/ft_detector/traditional_detector.hpp) | 传统检测参数、灯条及检测接口声明 | 2.1～2.4 |
 | [src/ft_detector/src/traditional_detector.cpp](../src/ft_detector/src/traditional_detector.cpp) | HSV、轮廓筛选、灯条配对和冲突处理 | 2.1～2.4 |
@@ -204,7 +209,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [src/ft_detector/include/ft_detector/detection_output.hpp](../src/ft_detector/include/ft_detector/detection_output.hpp) | 检测消息和 TF 的共享输出接口 | 4.1、4.2、4.4 |
 | [src/ft_detector/src/detection_output.cpp](../src/ft_detector/src/detection_output.cpp) | 检查输出字段，构造一致的检测消息与 TF | 4.2、4.4 |
 | [src/ft_detector/include/ft_detector/tuning_parameters.hpp](../src/ft_detector/include/ft_detector/tuning_parameters.hpp) | 算法参数与动态配置的转换接口 | 5.2、5.3 |
-| [src/ft_detector/src/tuning_parameters.cpp](../src/ft_detector/src/tuning_parameters.cpp) | 保留静态字段并转换 21 项在线参数 | 5.2、5.3 |
+| [src/ft_detector/src/tuning_parameters.cpp](../src/ft_detector/src/tuning_parameters.cpp) | 转换完整传统在线字段，启动配置沿用原 YAML 层级 | 5.2、5.3 |
 | [src/ft_detector/include/ft_detector/debug_draw.hpp](../src/ft_detector/include/ft_detector/debug_draw.hpp) | 调试绘图接口声明 | 2.2～2.4、3.4、4.3 |
 | [src/ft_detector/src/debug_draw.cpp](../src/ft_detector/src/debug_draw.cpp) | 在副本绘制灯条、候选、四点编号和有效位姿轴 | 2.2～2.4、3.4、4.3 |
 | [src/ft_detector/src/detector_node.cpp](../src/ft_detector/src/detector_node.cpp) | 接收图像/标定，选择识别模式，共用 PnP/发布与当前模式调试图 | 1～5、8.4、8.5 |
@@ -213,6 +218,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [src/ft_tracker/include/ft_tracker/linear_tracker.hpp](../src/ft_tracker/include/ft_tracker/linear_tracker.hpp) | 滤波状态、观测、参数和更新接口 | 6.1～6.5 |
 | [src/ft_tracker/src/linear_tracker.cpp](../src/ft_tracker/src/linear_tracker.cpp) | 预测/校正、关联、生命周期和未来位置 | 6.1～6.5 |
 | [src/ft_tracker/src/tracker_node.cpp](../src/ft_tracker/src/tracker_node.cpp) | 读取参数、接收检测并发布 Track 和 marker | 6.2～6.5 |
+| [src/ft_tracker/cfg/Tracker.cfg](../src/ft_tracker/cfg/Tracker.cfg) | 线性跟踪 Q/R、位置关联门限和提前量的动态字段 | 5.2、6.2～6.5 |
 | [src/ft_bringup/CMakeLists.txt](../src/ft_bringup/CMakeLists.txt) | 安装配置、RViz、查看器和 tools 下的 ROS 对比脚本 | 1.4、7.1、10.2 |
 | [src/ft_bringup/package.xml](../src/ft_bringup/package.xml) | 启动、选板、可视化、话题图、消息同步与独立工具依赖 | 1.4、7.1、9.5、10.2、10.3 |
 | [src/ft_bringup/launch/demo.launch](../src/ft_bringup/launch/demo.launch) | 默认启动检测、跟踪和选板，分别控制各节点与可视化窗口 | 7.1、8.5、9.5、10.1 |
@@ -241,6 +247,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [src/ft_selector/include/ft_selector/target_selector.hpp](../src/ft_selector/include/ft_selector/target_selector.hpp) | 选板接口、当前位置和未来位置 | 9.5 |
 | [src/ft_selector/src/target_selector.cpp](../src/ft_selector/src/target_selector.cpp) | 用未来相位和朝向选板，设置目标有效标志 | 9.5 |
 | [src/ft_selector/src/selector_node.cpp](../src/ft_selector/src/selector_node.cpp) | 从检测位姿提取朝向，发布 Target 和 RViz marker | 9.1、9.4、9.5 |
+| [src/ft_selector/cfg/Selector.cfg](../src/ft_selector/cfg/Selector.cfg) | 旋转 EKF 噪声、位置/角度门限和提前量的动态字段 | 5.2、9.3～9.5 |
 | [src/ft_msgs/msg/Target.msg](../src/ft_msgs/msg/Target.msg) | 车体 ID、有效标志、当前板及未来板位置 | 9.5 |
 | [src/ft_bringup/config/selector.yaml](../src/ft_bringup/config/selector.yaml) | 圆周半径、槽位、EKF 噪声、关联和选板参数 | 9.1～9.5 |
 | [src/ft_bringup/launch/selector.launch](../src/ft_bringup/launch/selector.launch) | 启动选板并读取与单板跟踪相同的提前量 | 9.5 |
@@ -269,7 +276,8 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [session_controller.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/session_controller.py) | 后台串行处理启停、切换、暂停和节点监控 |
 | [processes.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/processes.py) | 限时 master 调用与按进程身份执行的回收 |
 | [image_view.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/image_view.py) | 原图、检测结果或对比图的最新帧显示 |
-| [parameter_view.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/parameter_view.py) | 分别连接左右动态服务，在 Qt 主线程创建官方参数控件 |
+| [parameter_view.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/parameter_view.py) | 切换运行侧与模块，过滤无关字段，提供统一提前量控件 |
+| [tuning.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/tuning.py) | 固定服务连接并限制调用时间，检查 T 更新回执及失败回退 |
 | [__init__.py](../bonus/ft_rqt_gui/src/ft_rqt_gui/__init__.py) | Python 模块包入口 |
 | [gui_control_panel.png](images/gui_control_panel.png) | 真实控制台与同帧对比截图 |
 | [gui_parameters.png](images/gui_parameters.png) | 真实控制台内的参数编辑截图 |

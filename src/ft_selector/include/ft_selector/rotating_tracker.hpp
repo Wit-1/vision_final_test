@@ -31,6 +31,13 @@ struct RotatingParams {
   double initial_omega_variance = 0.0;
 };
 
+// 在线字段独立声明，避免改参数时意外替换半径、板数或初始协方差。
+struct RotatingTuning {
+  double linear_noise_density, angular_noise_density;
+  double position_variance, yaw_variance;
+  double position_gate_m, yaw_gate_rad;
+};
+
 struct ArmorObservation {
   Eigen::Vector3d position;
   double yaw;
@@ -50,6 +57,7 @@ struct VehicleEstimate {
 class RotatingTracker {
  public:
   explicit RotatingTracker(RotatingParams params);
+  void setTuning(const RotatingTuning& tuning);
   VehicleEstimate update(double stamp, const std::vector<ArmorObservation>& observations);
   void reset();
 
