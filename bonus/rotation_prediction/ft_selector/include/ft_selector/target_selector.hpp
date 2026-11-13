@@ -11,6 +11,8 @@ struct SelectedTarget {
   Eigen::Vector3d center = Eigen::Vector3d::Zero();
   Eigen::Vector3d current = Eigen::Vector3d::Zero();
   Eigen::Vector3d predicted = Eigen::Vector3d::Zero();
+  int current_slot = -1, predicted_slot = -1;
+  double current_phase = 0.0, predicted_phase = 0.0;
 };
 
 SelectedTarget selectTarget(const VehicleEstimate& vehicle, const CircleModel& circle,

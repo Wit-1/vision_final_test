@@ -14,6 +14,7 @@ class Workspace:
     environment: dict
     executables: dict
     signatures: dict
+    prediction_debug: bool = False
 
 
 def environment_for(root):
@@ -47,7 +48,7 @@ def inspect_workspace(root, dataset, needs_nn, tracker, selector):
     if result.returncode:
         raise ValueError('Workspace check failed for {}: {}'.format(root, result.stderr.strip()))
     info = json.loads(result.stdout)
-    return Workspace(root, env, info['executables'], info['signatures'])
+    return Workspace(root, env, info['executables'], info['signatures'], info.get('prediction_debug', False))
 
 
 def verify_loaded(workspace, package, pid):

@@ -1,4 +1,4 @@
-# 独立性能工具
+# 性能与可视化工具
 
 基准按原始 bag 的图像顺序调用主工程算法库，测量单帧处理开销，无需运行 ROS master 或播放 bag。以下命令均在项目根目录、已配置的 Noetic 环境中执行。
 
@@ -7,6 +7,7 @@
 | [CMakeLists.txt](CMakeLists.txt) | 独立构建 benchmark_pipeline，链接现有检测、跟踪和选板库 |
 | [benchmark_pipeline.cpp](benchmark_pipeline.cpp) | 读取原始图像与 CameraInfo，输出逐帧耗时 CSV |
 | [summarize_timings.py](summarize_timings.py) | 按数据集、模式和阶段汇总样本数、平均值与 P95 |
+| [reproject_predictions.py](../bonus/rotation_prediction/tools/reproject_predictions.py) | 源码集中在旋转附加题中，按源图像时间同步并重投影，不参与 EKF 状态估计 |
 
 ## 构建与运行
 
@@ -60,3 +61,13 @@ run.sh 自动传入项目根目录。参数按 detector.yaml→model.yaml→数�
 汇总输出 dataset、mode、stage、samples、mean_ms、p95_ms。P95 使用最近秩法，取升序样本的第 ceil(0.95×N) 项；各阶段分别统计，总 P95 直接计算逐帧 total_ms，不将各阶段 P95 相加。
 
 比较时使用相同素材范围、参数和线程配置，并避免同时运行其他推理任务。离线串行耗时不能直接当作完整在线链路的帧率，阶段数据用于定位主要开销。
+
+## 预测板投影
+
+投影工具已移到 `bonus/rotation_prediction/tools/`，仍由 ft_bringup 安装，统一 launch 和 GUI 在选板开启时自动运行，输出 `/ft/debug/prediction_image`。独立启动命令保持为：
+
+```bash
+roslaunch ft_bringup prediction_overlay.launch
+```
+
+紫色为当前模型板，蓝色为未来板；旧 Target 仅画黄色预测中心。输入时间、相机标定和范围检查，以及 T 秒后的观测对照，见 [旋转预测说明](../bonus/rotation_prediction/README.md)。投影绘图不计入本页的性能基准。

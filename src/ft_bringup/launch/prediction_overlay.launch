@@ -1,0 +1,17 @@
+<launch>
+  <arg name="image_topic" default="/ft/debug/image" />
+  <arg name="camera_info_topic" default="/hk_camera/camera_info" />
+  <arg name="prediction_topic" default="/ft/debug/rotation_prediction" />
+  <arg name="target_topic" default="/ft/target" />
+  <arg name="output_topic" default="/ft/debug/prediction_image" />
+  <arg name="full_pose" default="true" />
+  <node pkg="ft_bringup" type="reproject_predictions.py" name="prediction_overlay" output="screen" required="true">
+    <param name="image_topic" value="$(arg image_topic)" />
+    <param name="camera_info_topic" value="$(arg camera_info_topic)" />
+    <param name="prediction_topic" value="$(arg prediction_topic)" />
+    <param name="target_topic" value="$(arg target_topic)" />
+    <param name="output_topic" value="$(arg output_topic)" />
+    <param name="full_pose" value="$(arg full_pose)" />
+    <param name="edge_margin_px" value="3" />
+  </node>
+</launch>

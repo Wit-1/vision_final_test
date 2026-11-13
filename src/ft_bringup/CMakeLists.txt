@@ -10,4 +10,5 @@ catkin_install_python(PROGRAMS scripts/view_rviz.py scripts/view_reconfigure.py 
 catkin_install_python(PROGRAMS
   ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/compare_detections.py
   ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/compare_predictions.py
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../bonus/rotation_prediction/tools/reproject_predictions.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})

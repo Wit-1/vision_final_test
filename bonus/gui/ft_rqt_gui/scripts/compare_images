@@ -12,7 +12,7 @@ class Comparison:
     def __init__(self):
         self.bridge = CvBridge()
         self.labels = [rospy.get_param('~left_label'), rospy.get_param('~right_label')]
-        self.output = rospy.Publisher('/ft/debug/comparison', Image, queue_size=1)
+        self.output = rospy.Publisher(rospy.get_param('~output_topic', '/ft/debug/comparison'), Image, queue_size=1)
         self.inputs = [message_filters.Subscriber(rospy.get_param('~'+side+'_topic'), Image, queue_size=20)
                        for side in ('left', 'right')]
         self.sync = message_filters.TimeSynchronizer(self.inputs, 20, reset=True)

@@ -75,8 +75,13 @@ class ImageView(QWidget):
         if session:
             for index, side in enumerate(session.sides):
                 self.source.addItem(side.label + ' detection (' + side.mode + ')', 'side' + str(index))
+                if session.options.selector:
+                    self.source.addItem(side.label + ' prediction overlay', 'prediction' + str(index))
             if session.options.compare:
                 self.source.addItem('Comparison: ' + session.sides[0].label + ' / ' + session.sides[1].label, 'comparison')
+                if session.options.selector:
+                    self.source.addItem('Prediction comparison: ' + session.sides[0].label + ' / ' + session.sides[1].label,
+                                        'prediction_comparison')
         self.source.setCurrentIndex(self.source.count() - 1)
         self.source.blockSignals(False)
         # 各图源只缓存最近一帧，暂停后也能直接切换原图、检测图和对比图。
@@ -91,8 +96,13 @@ class ImageView(QWidget):
         if session:
             self._topics = {'raw': session.image_topic}
             self._topics.update({'side'+str(i): side.prefix + '/debug/image' for i, side in enumerate(session.sides)})
+            if session.options.selector:
+                self._topics.update({'prediction'+str(i): side.prefix + '/debug/prediction_image'
+                                     for i, side in enumerate(session.sides)})
             if session.options.compare:
                 self._topics['comparison'] = '/ft/debug/comparison'
+                if session.options.selector:
+                    self._topics['prediction_comparison'] = '/ft/debug/prediction_comparison_image'
             for source, topic in self._topics.items():
                 def receive(message, key=source):
                     # ROS 线程只保存最近消息；代次检查防止旧回调污染新会话。

@@ -13,10 +13,12 @@ vision_final_test/
 │   ├── ft_msgs/         # Track、Target 消息
 │   ├── ft_detector/     # 图像接入、识别、PnP、TF 和调参
 │   ├── ft_tracker/      # 单板匀速跟踪与提前量
-│   ├── ft_selector/     # 旋转车体估计与未来选板
+│   ├── ft_selector -> ../bonus/rotation_prediction/ft_selector
 │   ├── ft_bringup/      # 参数、启动和可视化配置
-│   └── ft_rqt_gui -> ../bonus/ft_rqt_gui
-├── bonus/              # 附加题：rqt 调试控制台源码与说明
+│   └── ft_rqt_gui -> ../bonus/gui/ft_rqt_gui
+├── bonus/
+│   ├── gui/            # rqt 调试控制台
+│   └── rotation_prediction/ # 旋转预测改进、投影工具与对照结果
 ├── tools/              # 资源准备、性能统计和辅助对比
 ├── docs/               # 文件介绍、学习问答和结果配图
 ├── ai_usage.md         # AI 辅助范围与本人决策
@@ -49,7 +51,7 @@ vision_final_test/
 ./run.sh gui
 ```
 
-控制台可选择素材、模式、倍率和功能，支持传统／NN 对比及 Baseline／Candidate 跨工作区对比；图像和参数同窗显示，RViz 可双窗联动。操作与限制见[附加题说明](bonus/README.md)。
+控制台可选择素材、模式、倍率和功能，支持传统／NN 对比及 Baseline／Candidate 跨工作区对比；图像和参数同窗显示，RViz 可双窗联动。操作与限制见 [GUI 说明](bonus/gui/README.md)，两个附加模块见 [bonus 目录](bonus/README.md)。
 
 下面保留命令行启动方式。
 
@@ -188,7 +190,7 @@ rosrun rqt_reconfigure rqt_reconfigure
 
 `/ft/track` 发布 ft_msgs/Track，包含轨迹 ID、命中标志、位置、速度和提前量位置。`/ft/debug/marker` 显示绿色当前位置、橙色未来位置及连线，纯预测时标记变淡。位置单位为 m，速度为 m/s，T 为 s。相机运动、同类目标交叉和旋转换板可能影响关联。
 
-下图为 red_4 运动片段的 RViz Marker 界面，订阅 `/ft/debug/marker`。绿色球为当前估计位置，橙色球为 T=0.1 s 的预测位置，橙线连接两者；按当前临时尺寸模型，这一帧两点间距约 7.8 cm。
+下图为 red_4 运动片段的 RViz Marker 界面，订阅 `/ft/debug/marker`。绿色球为当前估计位置，橙色球为 T=0.1 s 的预测位置，橙线连接两者。
 
 ![RViz 中的当前位置、提前量预测位置及连线](docs/images/prediction_marker_rviz.png)
 
@@ -236,7 +238,9 @@ rosrun rqt_reconfigure rqt_reconfigure
 ./run.sh play blue_guard -u 3 -r 0.15
 ```
 
-旋转 EKF 使用八维状态 [cx,cy,cz,vx,vy,vz,θ,ω]，分别表示车体中心、平移速度、相位和角速度；用图像时间差预测，角度及角残差环绕到 ±π，通过换板关联保持车体 ID。半径、槽位数和门限在 [selector.yaml](src/ft_bringup/config/selector.yaml) 中设置，提前量沿用 [tracker.yaml](src/ft_bringup/config/tracker.yaml)。默认半径 0.25 m 为试验值；模型假设相机稳定、装甲板等高等半径且等角分布，几何朝向检查不包含实际遮挡和视野边界。
+旋转 EKF 使用十一维状态 `[cx,cy,cz,vx,vy,vz,θ,ω,r,Δr,Δh]`，估计参考圆心、平移速度、相位、角速度和两组几何。四块板等角分布，槽位 0/2 的半径为 r，槽位 1/3 为 r+Δr。Δh 表示奇数组板中心相对偶数组的高度差，正值向上；相机 Y 向下，因此奇数组 Y=cy−Δh。它不是装甲板本身的高度。
+
+模型参考[同济 sp_vision_25 的两组几何建模](https://github.com/TongjiSuperPower/sp_vision_25/blob/bd9f5e7/tasks/auto_aim/target.cpp)，按本项目的相机 X-Z 旋转平面重新实现。用图像时间差预测，角度和角残差环绕到 ±π，换板保持车体 ID。默认半径 0.25 m 是初值，Δr、Δh 从零开始；几何初始方差、小幅随机游走噪声及范围在 [selector.yaml](src/ft_bringup/config/selector.yaml) 的 geometry 中设置。两组半径默认允许 0.05～0.50 m，|Δh|≤0.20 m。越界校正整组拒绝；观察量、转角或两组覆盖不足时显示 geometry warming up，不将初值称为实测尺寸。两板、三板模式只估计共同半径。
 
 首次选最近的有效板；已有轨迹时，将各模型槽位与同色观测配对，位置差门限为 0.40 m、角差门限为 0.70 rad。通过门限后，以归一化位置误差和角误差的平方和最小的一组校正，每帧只用一组观测，换槽位不更换车体 ID。
 
@@ -248,11 +252,15 @@ rosrun rqt_reconfigure rqt_reconfigure
 
 蓝紫用于看提前选板，蓝橙用于比较两种预测。判断偏差时，将同一帧发出的预测与 T 秒后的可见板对应。相机运动、突然变速或模型几何不符都可能使旋转预测失效。
 
-在 red_1_3 的一个换板样例中，NN 模式使用 T=0.1 s、半径 0.25 m，将约 3.68 s 发出的两路预测投到约 3.77 s 的图像。旋转预测已转向新面，距新可见板四点中心约 55 px；线性预测仍向旧板一侧外推，相距约 327 px。下图为局部放大，距离按原始 1440×1080 图像计算，是单个样例的二维对照。
+统一 launch 或 GUI 开启选板后，独立投影工具自动发布 `/ft/debug/prediction_image`，保留原检测图。紫色四边形表示当前模型板，蓝色表示 t+T 时刻选中的板；叠加在 t 时刻图像上，仅用于直观观察。四点、尺寸沿用 PnP 的灯条端点定义，安装倾角参考最近一次有效观测，通过相机内参与畸变投影。底部显示槽位、几何值、不确定性与视野检查；进入视野不代表没有实际遮挡。
 
-![旋转换板预测对照：当前图像与后续图像](docs/images/rotation_prediction.png)
+GUI 的 Images 提供每侧预测叠加及预测拼图，随选板自动启停，不设独立开关。旧 Baseline 缺少完整姿态时显示黄色预测中心十字，并明确标注 center only。`/ft/target` 保持原消息定义；新增 `/ft/debug/rotation_prediction` 记录同次预测使用的 T、源时间、未来时间、位姿和几何状态。
 
-固定半径、姿态噪声、突然变速，以及未建模的遮挡和视野边界都是模型的限制。
+![GUI 中的旋转预测重投影](bonus/rotation_prediction/images/prediction_overlay.png)
+
+T 秒后的精度需把 t 时刻保存的预测与 t+T 图像对齐，不能用当前图像上的重合程度代替。延迟对照由临时工具单独完成，不加入 GUI。模型仍假设相机稳定、旋转轴近似相机 Y、未来板沿用当前观测的板型与共同安装倾角；姿态噪声、变速、错误关联、遮挡和尺寸偏差仍可能影响预测。 `red_1_3` 和相机较稳定的 `blue_1` 可用于检查这些条件下的延迟预测；`blue_guard` 存在明显云台/相机运动，本分支未做惯性系补偿，将其作为运动相机下的失效样例。
+
+本次改进的 Before / Change / After、实际观察、T 秒后的对照结论和配图，集中在 [旋转预测附加题说明](bonus/rotation_prediction/README.md)。
 
 ## 第十点：全链路集成与性能
 
@@ -286,4 +294,4 @@ rosrun rqt_graph rqt_graph
 ## 参数依据与限制
 
 - **素材车辆的灯条尺寸：** 小板 135×56 mm、大板 230×56 mm 参考 Alliance2026 参数，未以素材实物的灯条中心距和发光长度校准，不能据此保证真实米制精度。
-- **旋转模型的车辆几何：** 半径 0.25 m 使用试验值；四槽位、等高、等半径和等角分布属于模型假设，未与素材车辆的实物结构核对。
+- **旋转模型的车辆几何：** 半径 0.25 m 是初值，半径及两组差异由观测估计；约束范围、等角分布和相机系旋转轴近似尚未与素材实物核对，不能把滤波结果直接当作实测几何。

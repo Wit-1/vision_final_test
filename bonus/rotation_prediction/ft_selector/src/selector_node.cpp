@@ -9,6 +9,7 @@
 #include <dynamic_reconfigure/server.h>
 #include <ft_detection/DetectionFrame.h>
 #include <ft_msgs/Target.h>
+#include <ft_msgs/PredictionDebug.h>
 #include <ft_selector/SelectorConfig.h>
 #include <ros/ros.h>
 #include <std_msgs/Header.h>
@@ -47,8 +48,9 @@ class SelectorNode {
     const auto detection = required<std::string>("detection_topic");
     const auto target = required<std::string>("target_topic");
     const auto markers = required<std::string>("marker_topic");
+    const auto prediction = required<std::string>("prediction_topic");
     const int queue = required<int>("queue_size");
-    if (detection.empty() || target.empty() || markers.empty() || queue <= 0 ||
+    if (detection.empty() || target.empty() || markers.empty() || prediction.empty() || queue <= 0 ||
         !std::isfinite(horizon_s_) || horizon_s_ < 0.0 ||
         !(min_facing_ >= 0.0 && min_facing_ < 1.0) ||
         !(min_horizontal_normal_ > 0.0 && min_horizontal_normal_ <= 1.0) ||
@@ -59,6 +61,8 @@ class SelectorNode {
     // 对外发布目标与基础 marker，只订阅检测消息。
     target_pub_ = nh_.advertise<ft_msgs::Target>(target, queue);
     marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>(markers, queue);
+    prediction_pub_ = nh_.advertise<ft_msgs::PredictionDebug>(prediction, queue);
+    readDimensions();
     detection_sub_ = nh_.subscribe(detection, queue, &SelectorNode::receiveDetections, this);
     initializeTuning();
     ROS_INFO_STREAM("Selector: " << detection << " -> " << target << ", radius="
@@ -90,7 +94,30 @@ class SelectorNode {
     params.yaw_variance = required<double>("yaw_variance");
     params.initial_velocity_variance = required<double>("initial_velocity_variance");
     params.initial_omega_variance = required<double>("initial_omega_variance");
+    params.radius_min_m = required<double>("geometry/radius_min_m");
+    params.radius_max_m = required<double>("geometry/radius_max_m");
+    params.max_height_difference_m = required<double>("geometry/max_height_difference_m");
+    params.initial_geometry_variance = required<double>("geometry/initial_variance");
+    params.geometry_noise_density = required<double>("geometry/noise_density");
+    params.geometry_min_phase_span_rad = required<double>("geometry/min_phase_span_rad");
+    params.geometry_min_observations = required<int>("geometry/min_observations");
+    params.estimate_pair_offsets = required<bool>("geometry/estimate_pair_offsets");
     return params;
+  }
+
+  // 尺寸直接读取同侧检测节点已加载的 PnP 配置，避免维护第二套物理尺寸。
+  void readDimensions() {
+    const ros::NodeHandle detector(ros::names::parentNamespace(private_nh_.getNamespace()) + "/ft_detector");
+    for (int large = 0; large < 2; ++large) {
+      const auto prefix = std::string("pnp/") + (large ? "large/" : "small/");
+      if (!detector.getParam(prefix + "width_m", widths_[large]) ||
+          !detector.getParam(prefix + "height_m", heights_[large]) ||
+          !std::isfinite(widths_[large]) || !std::isfinite(heights_[large]) ||
+          widths_[large] <= 0.0 || heights_[large] <= 0.0) {
+        widths_[large] = heights_[large] = 0.0;
+        ROS_WARN("PnP dimensions unavailable; prediction centers remain available without armor corners");
+      }
+    }
   }
 
   // 旋转调参使用启动 YAML 的默认值，T 仍从原有 linear 配置读取。
@@ -131,7 +158,8 @@ class SelectorNode {
   std::vector<ft_selector::ArmorObservation> observations(const ft_detection::DetectionFrame& frame) const {
     std::vector<ft_selector::ArmorObservation> result;
     result.reserve(frame.detections.size());
-    for (const auto& detection : frame.detections) {
+    for (std::size_t index = 0; index < frame.detections.size(); ++index) {
+      const auto& detection = frame.detections[index];
       const auto& p = detection.pose.position;
       const Eigen::Vector3d position(p.x, p.y, p.z);
       const auto& q = detection.pose.orientation;
@@ -145,9 +173,68 @@ class SelectorNode {
       const Eigen::Vector3d outward = -(rotation * Eigen::Vector3d::UnitZ());
       if (std::hypot(outward.x(), outward.z()) < min_horizontal_normal_ ||
           outward.x() * p.x + outward.z() * p.z >= 0.0) continue;
-      result.push_back({position, std::atan2(outward.x(), outward.z()), detection.is_red != 0});
+      result.push_back({position, std::atan2(outward.x(), outward.z()), detection.is_red != 0,
+                        detection.is_large_armor != 0, static_cast<int>(index)});
     }
     return result;
+  }
+
+  // 把同一次预测的时间、姿态与几何打包；调参后也不会把旧预测误配到新的 T。
+  void publishPrediction(const ft_detection::DetectionFrame& frame,
+                         const ft_selector::VehicleEstimate& vehicle,
+                         const ft_selector::SelectedTarget& target) {
+    if (vehicle.id != orientation_id_) {
+      orientation_id_ = vehicle.id;
+      have_orientation_ = false;
+    }
+    if (vehicle.observed && vehicle.detection_index >= 0 &&
+        static_cast<std::size_t>(vehicle.detection_index) < frame.detections.size()) {
+      const auto& pose = frame.detections[vehicle.detection_index].pose;
+      Eigen::Quaterniond rotation(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
+      rotation.normalize();
+      const Eigen::Vector3d outward = -(rotation * Eigen::Vector3d::UnitZ());
+      const double observed_phase = std::atan2(outward.x(), outward.z());
+      // 先去掉观测水平相位，保留当前有效 PnP 的倾角和滚转作为共同安装姿态。
+      mounting_rotation_ = Eigen::AngleAxisd(3.14159265358979323846 - observed_phase,
+                                            Eigen::Vector3d::UnitY()) * rotation.toRotationMatrix();
+      have_orientation_ = true;
+    }
+    ft_msgs::PredictionDebug output;
+    output.header = frame.header;
+    output.prediction_time_s = horizon_s_;
+    output.prediction_stamp = frame.header.stamp + ros::Duration(horizon_s_);
+    output.target_id = target.id;
+    output.geometry_ready = vehicle.geometry_ready;
+    output.plate_count = params_.circle.plate_count;
+    output.current_slot = target.current_slot; output.predicted_slot = target.predicted_slot;
+    output.detection_index = vehicle.detection_index;
+    output.is_large = vehicle.is_large;
+    output.width_m = widths_[vehicle.is_large]; output.height_m = heights_[vehicle.is_large];
+    output.valid = target.valid && have_orientation_ && output.width_m > 0.0 && output.height_m > 0.0;
+    output.current.position = toPoint(target.current);
+    output.predicted.position = toPoint(target.predicted);
+    // 局部 +Z 指向板背面；正面朝相机时 phase=pi，水平旋转为单位阵。
+    const auto set_orientation = [this](double phase, geometry_msgs::Quaternion& orientation) {
+      Eigen::Quaterniond rotation(Eigen::AngleAxisd(phase - 3.14159265358979323846,
+                                                   Eigen::Vector3d::UnitY()) * mounting_rotation_);
+      rotation.normalize();
+      orientation.x = rotation.x(); orientation.y = rotation.y();
+      orientation.z = rotation.z(); orientation.w = rotation.w();
+    };
+    if (have_orientation_) {
+      set_orientation(target.current_phase, output.current.orientation);
+      set_orientation(target.predicted_phase, output.predicted.orientation);
+    }
+    output.center = toPoint(vehicle.center);
+    output.velocity.x = vehicle.velocity.x(); output.velocity.y = vehicle.velocity.y(); output.velocity.z = vehicle.velocity.z();
+    output.phase = vehicle.phase; output.angular_velocity = vehicle.omega;
+    output.radius_m = vehicle.geometry.radius_m;
+    output.delta_radius_m = vehicle.geometry.delta_radius_m;
+    output.delta_height_m = vehicle.geometry.delta_height_m;
+    output.geometry_stddev.x = vehicle.geometry_stddev.x();
+    output.geometry_stddev.y = vehicle.geometry_stddev.y();
+    output.geometry_stddev.z = vehicle.geometry_stddev.z();
+    prediction_pub_.publish(output);
   }
 
   // 设置所有基础标记共用的 header、命名空间、生命周期和增删动作。
@@ -199,9 +286,10 @@ class SelectorNode {
 
     // 空检测仍进入 update 推进失联状态；异常时输出无效目标。
     ft_selector::SelectedTarget target;
+    ft_selector::VehicleEstimate vehicle;
     try {
       if (!header.frame_id.empty()) {
-        const auto vehicle = tracker_.update(header.stamp.toSec(), observations(*message));
+        vehicle = tracker_.update(header.stamp.toSec(), observations(*message));
         target = ft_selector::selectTarget(vehicle, params_.circle, horizon_s_, min_facing_);
       }
     } catch (const std::exception& error) {
@@ -219,6 +307,7 @@ class SelectorNode {
     output.position = toPoint(target.current);
     output.position_predict = toPoint(target.predicted);
     target_pub_.publish(output);
+    publishPrediction(*message, vehicle, target);
     last_header_ = header;
     publishMarkers(marker_header, target);
   }
@@ -232,9 +321,13 @@ class SelectorNode {
   boost::recursive_mutex tuning_mutex_;
   std::unique_ptr<TuningServer> tuning_server_;
   ros::Subscriber detection_sub_;
-  ros::Publisher target_pub_, marker_pub_;
+  ros::Publisher target_pub_, marker_pub_, prediction_pub_;
   std_msgs::Header last_header_;
   double horizon_s_, min_facing_, min_horizontal_normal_, marker_size_m_, marker_lifetime_s_;
+  double widths_[2]{0.0, 0.0}, heights_[2]{0.0, 0.0};
+  std::uint32_t orientation_id_ = 0;
+  bool have_orientation_ = false;
+  Eigen::Matrix3d mounting_rotation_ = Eigen::Matrix3d::Identity();
 };
 
 }  // namespace
