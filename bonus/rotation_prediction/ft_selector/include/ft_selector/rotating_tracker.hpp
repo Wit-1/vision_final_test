@@ -53,6 +53,7 @@ struct ArmorObservation {
   bool is_red;
   bool is_large = false;
   int detection_index = -1;  // Array index in this input frame, not a cross-frame identity.
+  Eigen::Vector4d variance_multipliers = Eigen::Vector4d::Ones();  // x, y, z, yaw; missing quality uses fixed R.
 };
 
 struct VehicleEstimate {

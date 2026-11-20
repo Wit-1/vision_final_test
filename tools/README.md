@@ -42,6 +42,8 @@ run.sh 自动传入项目根目录。参数按 detector.yaml→model.yaml→数�
 
 传统与 NN 均使用各自 YAML 中的 ROI 配置，搜索历史从片段起点建立；比较相同帧时还需保持起点一致。检测计时包含选中模式的 ROI 规划、区域确认和坐标还原。
 
+旋转观测使用 `selector.yaml` 的 `observation_noise` 规则，质量信息由同一检测 Pose、角点和 CameraInfo 计算；质量信息有效时直接加权，缺失时回退固定 R。重投影质量与观测转换计入 pose_ms，滤波更新计入 selector_ms。
+
 片段范围按 bag 记录时间选择；状态更新使用图像时间戳。工具缓存起点之前的最新有效 CameraInfo，跳过重复图像帧；时间回退或坐标系变化时重置算法状态。
 
 ## CSV 与统计范围
@@ -66,7 +68,7 @@ run.sh 自动传入项目根目录。参数按 detector.yaml→model.yaml→数�
 
 ## 预测板投影
 
-投影工具已移到 `bonus/rotation_prediction/tools/`，仍由 ft_bringup 安装，统一 launch 和 GUI 在选板开启时自动运行，输出 `/ft/debug/prediction_image`。独立启动命令保持为：
+投影工具位于 `bonus/rotation_prediction/tools/`，由 ft_bringup 安装，统一 launch 和 GUI 在选板开启时自动运行，输出 `/ft/debug/prediction_image`。独立启动命令：
 
 ```bash
 roslaunch ft_bringup prediction_overlay.launch

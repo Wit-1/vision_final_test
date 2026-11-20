@@ -24,6 +24,7 @@
 #include <ft_detector/pose_history.hpp>
 #include <ft_detector/traditional_roi.hpp>
 #include <ft_selector/target_selector.hpp>
+#include <ft_selector/observation_noise.hpp>
 #include <ft_tracker/linear_tracker.hpp>
 
 namespace {
@@ -230,6 +231,23 @@ ft_selector::RotatingParams rotatingParams(const YAML::Node& config) {
   return params;
 }
 
+// 离线工具沿用节点的质量规则与启动配置，不另设滤波或筛选参数。
+ft_selector::ObservationNoiseParams observationNoiseParams(const YAML::Node& config) {
+  const auto noise = config["observation_noise"];
+  ft_selector::ObservationNoiseParams params;
+  params.error_reference_px = noise["error_reference_px"].as<double>();
+  params.distance_reference_m = noise["distance_reference_m"].as<double>();
+  params.max_multiplier = noise["max_multiplier"].as<double>();
+  const auto strength = [&](const std::string& mode) {
+    return ft_selector::NoiseStrength{noise[mode]["confidence_reference"].as<double>(),
+        noise[mode]["position_strength"].as<double>(), noise[mode]["yaw_strength"].as<double>()};
+  };
+  params.nn = strength("nn");
+  params.tradition = strength("tradition");
+  ft_selector::validateObservationNoise(params);
+  return params;
+}
+
 // 将 bag 中的 CameraInfo 转为共用相机模型，内参不在工具中另设。
 ft_detector::CameraCalibration calibrationFrom(const sensor_msgs::CameraInfo& info) {
   ft_detector::CameraCalibration camera;
@@ -270,13 +288,15 @@ void run(const Options& options) {
   if (threads <= 0) throw std::invalid_argument("Invalid OpenCV processing thread count");
   cv::setNumThreads(threads);
   ft_detector::TraditionalRoiDetector traditional(traditionalParams(config), traditionalRoiParams(config));
-  ft_detector::PnpSolver solver(poseParams(config));
+  const auto pnp_params = poseParams(config);
+  ft_detector::PnpSolver solver(pnp_params);
   ft_detector::PoseHistory history(required<double>(config, "pnp/continuity/max_gap_s"),
                                    required<double>(config, "pnp/continuity/max_corner_shift_ratio"));
   std::unique_ptr<ft_detector::NnDetector> neural;
   if (options.mode == "nn") neural = std::make_unique<ft_detector::NnDetector>(neuralParams(config, package));
   const auto linear_params = linearParams(linear_config);
   const auto rotating_params = rotatingParams(rotating_config);
+  const auto observation_noise = observationNoiseParams(rotating_config);
   ft_tracker::LinearTracker linear(linear_params);
   ft_selector::RotatingTracker rotating(rotating_params);
   const double min_horizontal = required<double>(rotating_config, "min_horizontal_normal");
@@ -358,14 +378,30 @@ void run(const Options& options) {
     // 位姿阶段同时包含消息构造和两路观测转换，不做 ROS 发布。
     std::vector<ft_tracker::Observation> linear_observations;
     std::vector<ft_selector::ArmorObservation> rotating_observations;
-    for (const auto& detection : output.frame.detections) {
+    // 同一帧的全部装甲板共用相机参数，避免在候选循环中重复复制畸变数组。
+    const ft_selector::QualityCalibration quality_camera{camera.camera_matrix, camera.distortion,
+                                                       camera.image_size, camera.distortion_model};
+    for (std::size_t index = 0; index < output.frame.detections.size(); ++index) {
+      const auto& detection = output.frame.detections[index];
       const auto& p = detection.pose.position;
       linear_observations.push_back({detection.id, detection.is_red != 0, detection.is_large_armor != 0, {p.x,p.y,p.z}});
       const auto& q = detection.pose.orientation;
       Eigen::Quaterniond rotation(q.w,q.x,q.y,q.z);
       const Eigen::Vector3d normal = -(rotation.normalized() * Eigen::Vector3d::UnitZ());
-      if (std::hypot(normal.x(), normal.z()) >= min_horizontal && normal.x()*p.x + normal.z()*p.z < 0.0)
-        rotating_observations.push_back({{p.x,p.y,p.z}, std::atan2(normal.x(),normal.z()), detection.is_red != 0});
+      if (std::hypot(normal.x(), normal.z()) >= min_horizontal && normal.x()*p.x + normal.z()*p.z < 0.0) {
+        ft_selector::ArmorObservation observation{{p.x,p.y,p.z}, std::atan2(normal.x(),normal.z()),
+            detection.is_red != 0, detection.is_large_armor != 0, static_cast<int>(index)};
+        if (calibrated) {
+          std::array<cv::Point2d,4> corners;
+          for (std::size_t i = 0; i < corners.size(); ++i)
+            corners[i] = {detection.corners[i].x, detection.corners[i].y};
+          const auto& dimensions = detection.is_large_armor ? pnp_params.large : pnp_params.small;
+          const auto quality = ft_selector::measureObservationQuality(observation.position, rotation, corners,
+              dimensions.width_m, dimensions.height_m, detection.confidence, quality_camera);
+          observation.variance_multipliers = ft_selector::observationVarianceMultipliers(quality, options.mode, observation_noise);
+        }
+        rotating_observations.push_back(observation);
+      }
     }
     const auto posed = Clock::now();
     // 用图像时间分别更新平移跟踪与旋转选板，两者沿用同一 T。

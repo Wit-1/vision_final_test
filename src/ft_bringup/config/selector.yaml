@@ -27,6 +27,15 @@ yaw_variance: 0.04             # rad^2
 initial_velocity_variance: 4.0 # (m/s)^2
 initial_omega_variance: 25.0   # (rad/s)^2
 
+# Always apply quality scaling when quality inputs are valid; otherwise use fixed R.
+# NN uses the tested 1/2 preset; traditional keeps the first-version 1/1 preset.
+observation_noise:
+  error_reference_px: 1.0
+  distance_reference_m: 3.0
+  max_multiplier: 25.0
+  nn: {confidence_reference: 0.8, position_strength: 1.0, yaw_strength: 2.0}
+  tradition: {confidence_reference: 0.85, position_strength: 1.0, yaw_strength: 1.0}
+
 min_horizontal_normal: 0.5    # Reject normals with too little horizontal projection.
 min_facing_cosine: 0.20       # Minimum facing score for future plate selection.
 marker_size_m: 0.08

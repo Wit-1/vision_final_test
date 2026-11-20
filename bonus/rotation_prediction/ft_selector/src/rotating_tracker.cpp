@@ -25,6 +25,14 @@ bool usable(const ArmorObservation& observation) {
          std::isfinite(observation.yaw);
 }
 
+// 质量异常只回退固定 R，不改变原观测筛选和关联；合法倍率只放大基础方差。
+Eigen::Vector4d observationVariances(const ArmorObservation& observation, const RotatingParams& params) {
+  Eigen::Vector4d scales = observation.variance_multipliers;
+  if (!scales.allFinite() || (scales.array() < 1.0).any() || (scales.array() > 25.0).any()) scales.setOnes();
+  return Eigen::Vector4d(params.position_variance, params.position_variance,
+                         params.position_variance, params.yaw_variance).cwiseProduct(scales);
+}
+
 // Integrate continuous white acceleration over dt for one position/velocity pair.
 // 为位置/速度或相位/角速度这一对状态填入随 dt 积分的过程噪声。
 void addProcessNoise(StateMatrix& noise, int position, int velocity, double dt, double density) {
@@ -111,10 +119,11 @@ void RotatingTracker::initialize(const ArmorObservation& observation, double sta
   state_[8] = params_.circle.radius_m;
   state_.head<3>() = observation.position - params_.circle.radius_m * outwardNormal(state_[6]);
   // 初始化位置、速度、相位和角速度的不确定度。
+  const auto variance = observationVariances(observation, params_);
   covariance_.setZero();
-  covariance_.diagonal() << params_.position_variance, params_.position_variance,
-      params_.position_variance, params_.initial_velocity_variance, params_.initial_velocity_variance,
-      params_.initial_velocity_variance, params_.yaw_variance, params_.initial_omega_variance,
+  covariance_.diagonal() << variance[0], variance[1],
+      variance[2], params_.initial_velocity_variance, params_.initial_velocity_variance,
+      params_.initial_velocity_variance, variance[3], params_.initial_omega_variance,
       params_.initial_geometry_variance, 0.0, 0.0;
   if (params_.circle.plate_count == 4 && params_.estimate_pair_offsets) {
     covariance_(9, 9) = covariance_(10, 10) = params_.initial_geometry_variance;
@@ -123,10 +132,10 @@ void RotatingTracker::initialize(const ArmorObservation& observation, double sta
   const Eigen::Vector3d radial = outwardNormal(state_[6]);
   const Eigen::Vector3d tangent(std::cos(state_[6]), 0.0, -std::sin(state_[6]));
   covariance_.block<3, 3>(0, 0) += params_.initial_geometry_variance * radial * radial.transpose() +
-      params_.yaw_variance * state_[8] * state_[8] * tangent * tangent.transpose();
+      variance[3] * state_[8] * state_[8] * tangent * tangent.transpose();
   covariance_.block<3, 1>(0, 8) = -params_.initial_geometry_variance * radial;
   covariance_.block<1, 3>(8, 0) = covariance_.block<3, 1>(0, 8).transpose();
-  covariance_.block<3, 1>(0, 6) = -params_.yaw_variance * state_[8] * tangent;
+  covariance_.block<3, 1>(0, 6) = -variance[3] * state_[8] * tangent;
   covariance_.block<1, 3>(6, 0) = covariance_.block<3, 1>(0, 6).transpose();
   groups_seen_ = 1;
   observation_count_ = 1;
@@ -174,9 +183,8 @@ bool RotatingTracker::correct(const ArmorObservation& observation, int slot) {
     jacobian(1, 10) = -1.0;
   }
 
-  // 分别设置位置与角度观测噪声，通过 Cholesky 求解增益。
-  Eigen::Matrix4d noise = Eigen::Matrix4d::Identity() * params_.position_variance;
-  noise(3, 3) = params_.yaw_variance;
+  // 基础方差乘以观测质量倍率后直接构造 R，再通过 Cholesky 求解增益。
+  const Eigen::Matrix4d noise = observationVariances(observation, params_).asDiagonal();
   const Eigen::Matrix<double, 4, 11> projected_covariance = jacobian * covariance_;
   const Eigen::Matrix4d innovation = projected_covariance * jacobian.transpose() + noise;
   const Eigen::LLT<Eigen::Matrix4d> factor(innovation);

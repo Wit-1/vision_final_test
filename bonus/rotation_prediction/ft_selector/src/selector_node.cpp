@@ -1,8 +1,11 @@
+#include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Geometry>
@@ -12,10 +15,12 @@
 #include <ft_msgs/PredictionDebug.h>
 #include <ft_selector/SelectorConfig.h>
 #include <ros/ros.h>
+#include <sensor_msgs/CameraInfo.h>
 #include <std_msgs/Header.h>
 #include <visualization_msgs/MarkerArray.h>
 
 #include "ft_selector/target_selector.hpp"
+#include "ft_selector/observation_noise.hpp"
 
 namespace {
 
@@ -58,11 +63,12 @@ class SelectorNode {
         !std::isfinite(marker_lifetime_s_) || marker_lifetime_s_ <= 0.0)
       throw std::invalid_argument("Invalid selector topics, horizon, visibility or marker parameters");
 
-    // 对外发布目标与基础 marker，只订阅检测消息。
+    // 检测仍驱动每帧更新；CameraInfo 只补充观测质量所需的标定。
     target_pub_ = nh_.advertise<ft_msgs::Target>(target, queue);
     marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>(markers, queue);
     prediction_pub_ = nh_.advertise<ft_msgs::PredictionDebug>(prediction, queue);
     readDimensions();
+    initializeObservationNoise();
     detection_sub_ = nh_.subscribe(detection, queue, &SelectorNode::receiveDetections, this);
     initializeTuning();
     ROS_INFO_STREAM("Selector: " << detection << " -> " << target << ", radius="
@@ -120,6 +126,50 @@ class SelectorNode {
     }
   }
 
+  // 从同侧检测配置获取模式与相机入口；旧 Baseline 无需增加新接口。
+  void initializeObservationNoise() {
+    const auto prefix = std::string("observation_noise/");
+    noise_params_.error_reference_px = required<double>(prefix + "error_reference_px");
+    noise_params_.distance_reference_m = required<double>(prefix + "distance_reference_m");
+    noise_params_.max_multiplier = required<double>(prefix + "max_multiplier");
+    const auto strength = [&](const std::string& mode) {
+      return ft_selector::NoiseStrength{required<double>(prefix + mode + "/confidence_reference"),
+          required<double>(prefix + mode + "/position_strength"), required<double>(prefix + mode + "/yaw_strength")};
+    };
+    noise_params_.nn = strength("nn");
+    noise_params_.tradition = strength("tradition");
+    ft_selector::validateObservationNoise(noise_params_);
+    const ros::NodeHandle detector(ros::names::parentNamespace(private_nh_.getNamespace()) + "/ft_detector");
+    if (!private_nh_.getParam("mode", detector_mode_)) detector.getParam("mode", detector_mode_);
+    std::string topic;
+    private_nh_.getParam("camera_info_topic", topic);
+    if (topic.empty()) detector.getParam("camera_info_topic", topic);
+    if (!topic.empty()) camera_sub_ = nh_.subscribe(topic, 1, &SelectorNode::receiveCameraInfo, this);
+    if (topic.empty() || (detector_mode_ != "nn" && detector_mode_ != "tradition"))
+      ROS_WARN("Observation quality input is incomplete; fixed R remains available");
+    ROS_INFO_STREAM("Observation noise: quality weighted, detector mode=" << detector_mode_ << ", CameraInfo=" << topic);
+  }
+
+  // 无效标定主动清空缓存，后续检测继续按固定 R 跟踪，不丢弃原有观测。
+  void receiveCameraInfo(const sensor_msgs::CameraInfoConstPtr& info) {
+    camera_info_.reset();
+    if (info->header.frame_id.empty() || info->width == 0 || info->height == 0 ||
+        info->width > static_cast<unsigned>(std::numeric_limits<int>::max()) ||
+        info->height > static_cast<unsigned>(std::numeric_limits<int>::max()) ||
+        info->binning_x > 1 || info->binning_y > 1 || info->roi.do_rectify ||
+        info->roi.x_offset || info->roi.y_offset ||
+        (info->roi.width && info->roi.width != info->width) ||
+        (info->roi.height && info->roi.height != info->height)) return;
+    ft_selector::QualityCalibration camera;
+    std::copy(info->K.begin(), info->K.end(), camera.matrix.val);
+    camera.distortion.assign(info->D.begin(), info->D.end());
+    camera.image_size = cv::Size(info->width, info->height);
+    camera.distortion_model = info->distortion_model;
+    if (!ft_selector::validQualityCalibration(camera)) return;
+    camera_info_ = info;
+    quality_camera_ = std::move(camera);
+  }
+
   // 旋转调参使用启动 YAML 的默认值，T 仍从原有 linear 配置读取。
   void initializeTuning() {
     active_tuning_.linear_noise_density = params_.linear_noise_density;
@@ -173,8 +223,19 @@ class SelectorNode {
       const Eigen::Vector3d outward = -(rotation * Eigen::Vector3d::UnitZ());
       if (std::hypot(outward.x(), outward.z()) < min_horizontal_normal_ ||
           outward.x() * p.x + outward.z() * p.z >= 0.0) continue;
-      result.push_back({position, std::atan2(outward.x(), outward.z()), detection.is_red != 0,
-                        detection.is_large_armor != 0, static_cast<int>(index)});
+      ft_selector::ArmorObservation observation{position, std::atan2(outward.x(), outward.z()), detection.is_red != 0,
+                                               detection.is_large_armor != 0, static_cast<int>(index)};
+      // 质量信息完整才加权；不改变前面的位姿、法向门控或每帧一次校正。
+      if (camera_info_ && camera_info_->header.frame_id == frame.header.frame_id) {
+        std::array<cv::Point2d,4> corners;
+        for (std::size_t i = 0; i < corners.size(); ++i)
+          corners[i] = {detection.corners[i].x, detection.corners[i].y};
+        const int large = detection.is_large_armor != 0;
+        const auto quality = ft_selector::measureObservationQuality(position, rotation, corners,
+            widths_[large], heights_[large], detection.confidence, quality_camera_);
+        observation.variance_multipliers = ft_selector::observationVarianceMultipliers(quality, detector_mode_, noise_params_);
+      }
+      result.push_back(observation);
     }
     return result;
   }
@@ -282,6 +343,7 @@ class SelectorNode {
     if (!previous.frame_id.empty() && sameFrame(previous, header)) return;
     if (header.frame_id != previous.frame_id || header.stamp < previous.stamp) {
       tracker_.reset();
+      if (!previous.frame_id.empty()) camera_info_.reset();
     }
 
     // 空检测仍进入 update 推进失联状态；异常时输出无效目标。
@@ -320,7 +382,11 @@ class SelectorNode {
   ft_selector::SelectorConfig active_tuning_;
   boost::recursive_mutex tuning_mutex_;
   std::unique_ptr<TuningServer> tuning_server_;
-  ros::Subscriber detection_sub_;
+  ros::Subscriber detection_sub_, camera_sub_;
+  sensor_msgs::CameraInfoConstPtr camera_info_;
+  ft_selector::QualityCalibration quality_camera_;
+  ft_selector::ObservationNoiseParams noise_params_;
+  std::string detector_mode_;
   ros::Publisher target_pub_, marker_pub_, prediction_pub_;
   std_msgs::Header last_header_;
   double horizon_s_, min_facing_, min_horizontal_normal_, marker_size_m_, marker_lifetime_s_;
