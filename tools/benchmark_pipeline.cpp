@@ -22,6 +22,7 @@
 #include <ft_detector/detection_output.hpp>
 #include <ft_detector/nn_detector.hpp>
 #include <ft_detector/pose_history.hpp>
+#include <ft_detector/traditional_roi.hpp>
 #include <ft_selector/target_selector.hpp>
 #include <ft_tracker/linear_tracker.hpp>
 
@@ -115,6 +116,22 @@ ft_detector::TraditionalParams traditionalParams(const YAML::Node& config) {
   return params;
 }
 
+// 离线工具加载与在线节点相同的传统搜索参数，避免性能测量仍走旧全图流程。
+ft_detector::RoiParams traditionalRoiParams(const YAML::Node& config) {
+  const auto roi = config["traditional"]["roi"];
+  ft_detector::RoiParams params;
+  params.enabled = roi["enabled"].as<bool>();
+  params.search_interval_s = roi["search_interval_s"].as<double>();
+  params.max_history_gap_s = roi["max_history_gap_s"].as<double>();
+  params.horizontal_padding = roi["horizontal_padding"].as<double>();
+  params.vertical_padding = roi["vertical_padding"].as<double>();
+  params.min_width = roi["min_width"].as<int>();
+  params.min_height = roi["min_height"].as<int>();
+  params.confirmation_searches = roi["confirmation_searches"].as<int>();
+  params.max_misses = roi["max_misses"].as<int>();
+  return params;
+}
+
 // 读取大小板尺寸、临时尺寸开关与 PnP 筛选条件。
 ft_detector::PnpParams poseParams(const YAML::Node& config) {
   const auto dimensions = [&](const std::string& size) {
@@ -154,6 +171,29 @@ ft_detector::NnParams neuralParams(const YAML::Node& config, const fs::path& pac
   params.thresholds = {required<double>(config, "tuning/nn_min_color_score"),
       required<double>(config, "tuning/nn_min_number_score"), required<double>(config, "tuning/nn_min_confidence"),
       required<double>(config, "tuning/nn_nms_iou")};
+  const auto policy=config["nn"]["number_size"];
+  if (policy) {
+    params.size_policy.enabled=policy["enabled"].as<bool>();
+    params.size_policy.min_score=policy["min_score"].as<double>();
+    params.size_policy.min_margin=policy["min_margin"].as<double>();
+    const auto sizes=policy["class_sizes"].as<std::vector<int>>();
+    if (sizes.size()!=9) throw std::invalid_argument("Expected nine number-size rules");
+    std::copy(sizes.begin(),sizes.end(),params.size_policy.class_sizes.begin());
+  }
+  const auto roi=config["nn"]["roi"];
+  if (roi) {
+    params.roi.enabled=roi["enabled"].as<bool>();
+    params.roi.search_interval_s=roi["search_interval_s"].as<double>();
+    params.roi.max_history_gap_s=roi["max_history_gap_s"].as<double>();
+    params.roi.horizontal_padding=roi["horizontal_padding"].as<double>();
+    params.roi.vertical_padding=roi["vertical_padding"].as<double>();
+    params.roi.min_width=roi["min_width"].as<int>();
+    params.roi.min_height=roi["min_height"].as<int>();
+    params.roi.confirmation_searches=roi["confirmation_searches"].as<int>();
+    params.roi.max_misses=roi["max_misses"].as<int>();
+    params.roi.seed_number_score=roi["seed_number_score"].as<double>();
+    params.roi.seed_number_margin=roi["seed_number_margin"].as<double>();
+  }
   return params;
 }
 
@@ -225,10 +265,11 @@ void run(const Options& options) {
   const auto linear_config = YAML::LoadFile((config_dir / "tracker.yaml").string());
   const auto rotating_config = YAML::LoadFile((config_dir / "selector.yaml").string());
   // 建立两种检测、PnP 历史及两种跟踪器，状态在相邻图像间持续保存。
-  const int threads = required<int>(config, "processing_threads");
+  const int threads = options.mode=="nn" && config["nn"]["processing_threads"]
+      ? required<int>(config,"nn/processing_threads") : required<int>(config,"processing_threads");
   if (threads <= 0) throw std::invalid_argument("Invalid OpenCV processing thread count");
   cv::setNumThreads(threads);
-  ft_detector::TraditionalDetector traditional(traditionalParams(config));
+  ft_detector::TraditionalRoiDetector traditional(traditionalParams(config), traditionalRoiParams(config));
   ft_detector::PnpSolver solver(poseParams(config));
   ft_detector::PoseHistory history(required<double>(config, "pnp/continuity/max_gap_s"),
                                    required<double>(config, "pnp/continuity/max_corner_shift_ratio"));
@@ -299,8 +340,8 @@ void run(const Options& options) {
     const auto decoded = Clock::now();
     // 只测选中的检测方式，NN 阶段包含预处理、推理和后处理。
     ft_detector::DetectionResult result;
-    if (neural) result.armors = neural->detect(bgr);
-    else result = traditional.detect(bgr);
+    if (neural) result.armors = neural->detect(bgr,header.stamp.toSec(),header.frame_id);
+    else result = traditional.detect(bgr,header.stamp.toSec(),header.frame_id);
     const auto detected = Clock::now();
     // 共用 PnP 与历史选解逻辑，缺标定时保留空的有效检测输出。
     const bool calibrated = info && camera.image_size == bgr.size() && info->header.frame_id == header.frame_id;
@@ -339,6 +380,7 @@ void run(const Options& options) {
     const auto selected = Clock::now();
     // 绘图纳入串行总用时，CSV 写入位于最后一个计时点之后。
     auto debug = ft_detector::drawDetections(bgr, result, details);
+    ft_detector::drawRoiDebug(debug,neural ? neural->debugState() : traditional.debugState());
     ft_detector::drawPoses(debug, poses, calibrated ? "ready" : "awaiting_camera_info", details);
     const auto drawn = Clock::now();
     std::cout << options.dataset << ',' << options.mode << ',' << header.stamp.toNSec() << ','

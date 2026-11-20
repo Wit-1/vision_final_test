@@ -55,6 +55,7 @@ cv::Mat drawDetections(const cv::Mat& bgr, const DetectionResult& result, bool d
       std::ostringstream score;
       score << std::fixed << std::setprecision(2) << armor.confidence;
       label += " #" + std::string(names[armor.number_class]) + " c=" + score.str();
+      label += armor.size_from_number ? " size:number" : " size:geometry";
     }
     const auto box = cv::boundingRect(std::vector<cv::Point2f>(armor.corners.begin(), armor.corners.end()));
     cv::putText(debug, label, cv::Point(box.x, std::max(18, box.y - 8)),

@@ -10,11 +10,35 @@
 
 #include <onnxruntime_cxx_api.h>
 #include <opencv2/imgproc.hpp>
+#include "detection_improvements/roi_planner.hpp"
 
 namespace ft_detector {
 namespace {
 // 固定模型输出协议；筛选门限和运行线程数仍从配置读取。
 constexpr int kChannels = 21, kCandidates = 6300;
+
+// 编号判型仅属于 NN；共享 ROI 不依赖编号含义。
+void applyNumberSize(ArmorCandidate& armor, const NnSizePolicy& policy) {
+  armor.geometric_large=armor.is_large_armor;
+  armor.size_from_number=false;
+  if (!policy.enabled || armor.number_class<0 || armor.number_class>=9 ||
+      armor.number_score<policy.min_score || armor.number_margin<policy.min_margin) return;
+  const int size=policy.class_sizes[armor.number_class];
+  if (size<0) return;
+  armor.is_large_armor=size==1;
+  armor.size_from_number=true;
+}
+
+// 保持 NN 的 4:3 裁剪、联合可信区和原编号分数门控。
+RoiPolicy neuralRoiPolicy(const NnRoiParams& params) {
+  RoiPolicy policy;
+  policy.keep_model_aspect=true;
+  policy.trust_union=true;
+  policy.seed_filter=[params](const ArmorCandidate& armor) {
+    return armor.number_score>=params.seed_number_score && armor.number_margin>=params.seed_number_margin;
+  };
+  return policy;
+}
 
 // 模型已输出分数，检查合法区间，不再额外执行 sigmoid。
 bool unitScore(double value) { return std::isfinite(value) && value >= 0.0 && value <= 1.0; }
@@ -38,13 +62,16 @@ double iou(const cv::Rect2f& first, const cv::Rect2f& second) {
 
 // 先减补边，再除实际缩放比例，将模型画布坐标还原到原图。
 cv::Point2f LetterboxTransform::toOriginal(const cv::Point2f& point) const {
-  return {static_cast<float>((point.x - left) / scale_x),
-          static_cast<float>((point.y - top) / scale_y)};
+  return {static_cast<float>((point.x - left) / scale_x + roi_origin.x),
+          static_cast<float>((point.y - top) / scale_y + roi_origin.y)};
 }
 
 // 校验固定输入协议、几何门限、线程数和四项动态阈值。
 void NnDetector::validateParams(const NnParams& params) {
+  validateRoiParams(params.roi);
   const auto& thresholds = params.thresholds;
+  const auto& roi=params.roi;
+  const auto& policy=params.size_policy;
   if (params.model_path.empty() || params.input_width != 640 || params.input_height != 480 ||
       params.pad_value < 0 || params.pad_value > 255 || params.cpu_threads <= 0 ||
       params.max_candidates <= 0 || params.max_candidates > kCandidates ||
@@ -52,7 +79,10 @@ void NnDetector::validateParams(const NnParams& params) {
       !std::isfinite(params.min_quad_area_px2) || params.min_quad_area_px2 <= 0.0 ||
       !std::isfinite(params.min_edge_length_px) || params.min_edge_length_px <= 0.0 ||
       !unitScore(thresholds.color_score) || !unitScore(thresholds.number_score) ||
-      !unitScore(thresholds.confidence) || !unitScore(thresholds.nms_iou)) {
+      !unitScore(thresholds.confidence) || !unitScore(thresholds.nms_iou) ||
+      !unitScore(policy.min_score) || !unitScore(policy.min_margin) ||
+      !std::all_of(policy.class_sizes.begin(),policy.class_sizes.end(),[](int v){return v>=-1 && v<=1;}) ||
+      !unitScore(roi.seed_number_score) || !unitScore(roi.seed_number_margin)) {
     throw std::invalid_argument("Invalid neural model protocol, geometry or thresholds");
   }
 }
@@ -125,6 +155,11 @@ std::vector<ArmorCandidate> decodeNnOutput(const float* values, std::size_t coun
     armor.id = candidate;  // Deterministic tie-break only; replaced by frame-local IDs after NMS.
     armor.is_red = color == 1;
     armor.number_class = number;
+    armor.number_score=static_cast<float>(number_score);
+    double runner_up=0;
+    for (int index=0;index<9;++index)
+      if (index!=number) runner_up=std::max<double>(runner_up,score(index+4,candidate));
+    armor.number_margin=static_cast<float>(number_score-runner_up);
     armor.confidence = static_cast<float>(confidence);
     constexpr int order[] = {0, 3, 2, 1};  // Model TL/BL/BR/TR -> shared TL/TR/BR/BL.
     bool valid_points = true;
@@ -150,6 +185,7 @@ std::vector<ArmorCandidate> decodeNnOutput(const float* values, std::size_t coun
     const double mean_length = (cv::norm(armor.corners[0] - armor.corners[3]) +
                                 cv::norm(armor.corners[1] - armor.corners[2])) * 0.5;
     armor.is_large_armor = cv::norm(left - right) / mean_length >= params.large_armor_min_spacing_ratio;
+    applyNumberSize(armor,params.size_policy);
     armor.center = (left + right) * 0.5F;
     armors.push_back(armor);
   }
@@ -177,13 +213,15 @@ std::vector<ArmorCandidate> decodeNnOutput(const float* values, std::size_t coun
 
 // 将 ONNX Runtime 资源封装在实现文件中，头文件只暴露检测接口。
 struct NnDetector::Impl {
+  RoiPlanner roi;
+  NnDebugState debug;
   Ort::Env environment{ORT_LOGGING_LEVEL_WARNING, "ft_nn"};
   Ort::SessionOptions options;
   Ort::Session session{nullptr};
   Ort::MemoryInfo memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
   // 启动时只创建一次 Session，并核对输入输出名称、类型与形状。
-  explicit Impl(const NnParams& params) {
+  explicit Impl(const NnParams& params):roi(params.roi,neuralRoiPolicy(params.roi)) {
     options.SetIntraOpNumThreads(params.cpu_threads);
     options.SetInterOpNumThreads(1);
     options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
@@ -226,11 +264,22 @@ void NnDetector::setThresholds(const NnThresholds& thresholds, double large_armo
   next.large_armor_min_spacing_ratio = large_armor_min_spacing_ratio;
   validateParams(next);
   params_ = next;
+  resetHistory();
 }
 
 // 单帧推理入口：预处理、运行 Session、检查输出并解码候选。
 std::vector<ArmorCandidate> NnDetector::detect(const cv::Mat& bgr) {
-  auto input = prepareNnInput(bgr, params_);
+  if (params_.roi.enabled) throw std::invalid_argument("ROI requires detect(image, timestamp, frame_id)");
+  return detect(bgr,0.0,"image");
+}
+
+// 每帧先规划搜索窗口，模型输出恢复为原图坐标后才进入公共解算。
+std::vector<ArmorCandidate> NnDetector::detect(const cv::Mat& bgr,double stamp_s,const std::string& frame_id) {
+  if (bgr.empty()) throw std::invalid_argument("Empty neural input");
+  impl_->debug=impl_->roi.begin(bgr.size(),stamp_s,frame_id);
+  auto input = prepareNnInput(bgr(impl_->debug.crop), params_);
+  input.transform.original_size=bgr.size();
+  input.transform.roi_origin=impl_->debug.crop.tl();
   const std::array<int64_t, 4> shape{{1, 3, params_.input_height, params_.input_width}};
   auto tensor = Ort::Value::CreateTensor<float>(impl_->memory, input.blob.ptr<float>(), input.blob.total(),
                                                shape.data(), shape.size());
@@ -242,8 +291,22 @@ std::vector<ArmorCandidate> NnDetector::detect(const cv::Mat& bgr) {
   if (info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
       info.GetShape() != std::vector<int64_t>({1, kChannels, kCandidates}))
     throw std::runtime_error("Runtime output differs from model protocol");
-  return decodeNnOutput(outputs.front().GetTensorData<float>(), info.GetElementCount(), input.transform, params_);
+  auto armors=decodeNnOutput(outputs.front().GetTensorData<float>(), info.GetElementCount(), input.transform, params_);
+  // ROI 外的像素没有进入模型，即使还在全图内，也不接受越出实际裁剪窗口的四点。
+  const cv::Rect2f visible(impl_->debug.crop);
+  armors.erase(std::remove_if(armors.begin(),armors.end(),[&](const ArmorCandidate& armor){
+    return std::any_of(armor.corners.begin(),armor.corners.end(),[&](const cv::Point2f& point){
+      return !visible.contains(point);
+    });
+  }),armors.end());
+  return impl_->roi.finish(armors);
 }
+
+void NnDetector::resetHistory() { impl_->roi.reset(); impl_->debug={}; }
+const NnDebugState& NnDetector::debugState() const { return impl_->debug; }
+
+// 兼容原工具的绘图入口，实际绘制逻辑由两种检测方式共享。
+void drawNnDebug(cv::Mat& image,const NnDebugState& state) { drawRoiDebug(image,state); }
 
 // 向日志和独立工具提供实际使用的推理后端版本。
 std::string NnDetector::backendVersion() { return OrtGetApiBase()->GetVersionString(); }

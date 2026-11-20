@@ -19,7 +19,7 @@ generate_dynamic_reconfigure_options(cfg/Detector.cfg)
 
 catkin_package(
   INCLUDE_DIRS include
-  LIBRARIES ft_detector_core ft_detector_output ft_detector_tuning ft_detector_nn
+  LIBRARIES ft_detector_core ft_detector_output ft_detector_tuning ft_detector_nn ft_detector_roi
   CATKIN_DEPENDS roscpp sensor_msgs cv_bridge image_transport geometry_msgs std_msgs tf2 tf2_ros ft_detection dynamic_reconfigure
   DEPENDS OpenCV
 )
@@ -36,12 +36,22 @@ target_compile_options(ft_detector_core PRIVATE -Wall -Wextra)
 target_include_directories(ft_detector_core PUBLIC include ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(ft_detector_core ${OpenCV_LIBRARIES})
 
+get_filename_component(DETECTION_BONUS "${CMAKE_CURRENT_SOURCE_DIR}/../../bonus/detection_improvements" ABSOLUTE)
+# Search history is shared, without importing the neural runtime into traditional ROI.
+add_library(ft_detector_roi ${DETECTION_BONUS}/src/roi_planner.cpp ${DETECTION_BONUS}/src/traditional_roi.cpp)
+target_compile_features(ft_detector_roi PUBLIC cxx_std_14)
+target_compile_options(ft_detector_roi PRIVATE -Wall -Wextra)
+target_include_directories(ft_detector_roi PUBLIC include ${OpenCV_INCLUDE_DIRS})
+target_include_directories(ft_detector_roi PRIVATE ${DETECTION_BONUS}/include)
+target_link_libraries(ft_detector_roi PUBLIC ft_detector_core)
+
 add_library(ft_detector_nn src/nn_detector.cpp)
 target_compile_features(ft_detector_nn PUBLIC cxx_std_17)
 target_compile_options(ft_detector_nn PRIVATE -Wall -Wextra)
 target_include_directories(ft_detector_nn PUBLIC include ${OpenCV_INCLUDE_DIRS})
+target_include_directories(ft_detector_nn PRIVATE ${DETECTION_BONUS}/include)
 target_include_directories(ft_detector_nn SYSTEM PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
-target_link_libraries(ft_detector_nn PUBLIC ft_detector_core "${ONNXRUNTIME_LIBRARY}")
+target_link_libraries(ft_detector_nn PUBLIC ft_detector_roi "${ONNXRUNTIME_LIBRARY}")
 set_target_properties(ft_detector_nn PROPERTIES INSTALL_RPATH "${ONNXRUNTIME_LIBRARY_DIR}")
 
 # Keep ROS message/TF conversion outside the ROS-independent algorithm library.
@@ -66,7 +76,7 @@ target_include_directories(ft_detector_node PRIVATE ${catkin_INCLUDE_DIRS})
 add_dependencies(ft_detector_node ${PROJECT_NAME}_gencfg ${catkin_EXPORTED_TARGETS})
 target_link_libraries(ft_detector_node ft_detector_output ft_detector_tuning ft_detector_nn ${catkin_LIBRARIES})
 
-install(TARGETS ft_detector_core ft_detector_output ft_detector_tuning ft_detector_nn ft_detector_node
+install(TARGETS ft_detector_core ft_detector_output ft_detector_tuning ft_detector_roi ft_detector_nn ft_detector_node
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})

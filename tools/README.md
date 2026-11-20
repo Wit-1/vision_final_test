@@ -40,6 +40,8 @@ python3 tools/summarize_timings.py runs/red_4_tradition.csv runs/red_4_nn.csv --
 
 run.sh 自动传入项目根目录。参数按 detector.yaml→model.yaml→数据集 YAML 合并，跟踪与选板分别读取 tracker.yaml、selector.yaml。基准使用启动配置，不读取在线调参界面的临时值。
 
+传统与 NN 均使用各自 YAML 中的 ROI 配置，搜索历史从片段起点建立；比较相同帧时还需保持起点一致。检测计时包含选中模式的 ROI 规划、区域确认和坐标还原。
+
 片段范围按 bag 记录时间选择；状态更新使用图像时间戳。工具缓存起点之前的最新有效 CameraInfo，跳过重复图像帧；时间回退或坐标系变化时重置算法状态。
 
 ## CSV 与统计范围

@@ -7,8 +7,27 @@ nn:
   input_width: 640
   input_height: 480
   pad_value: 124
-  cpu_threads: 2
+  cpu_threads: 8
+  processing_threads: 2  # NN-only OpenCV setting; traditional mode keeps the top-level value.
   max_candidates: 300
+  number_size:
+    enabled: true
+    min_score: 0.8
+    min_margin: 0.1
+    # sentry, 1, 2, 3, 4, 5, outpost, base, base; -1 keeps geometry.
+    class_sizes: [0, 1, 0, -1, -1, -1, 0, -1, -1]
+  roi:
+    enabled: true
+    search_interval_s: 0.2
+    max_history_gap_s: 0.5
+    horizontal_padding: 2.0
+    vertical_padding: 0.5
+    min_width: 160
+    min_height: 96
+    confirmation_searches: 2
+    max_misses: 2
+    seed_number_score: 0.8
+    seed_number_margin: 0.1
 
 # Loaded after detector.yaml; the original 21 traditional fields remain in place.
 tuning:
