@@ -9,7 +9,7 @@
 ```text
 vision_final_test/                     # 独立 Git 仓库、独立 catkin 工作空间
 ├── README.md                          # 项目入口：环境、构建、运行、参数、限制
-├── ai_usage.md                        # 关键 AI 辅助和本人项目决策
+├── ai_usage.md                        # 关键 AI 辅助和我的项目决策
 ├── .gitignore                         # 排除素材、依赖、缓存和生成结果
 ├── run.sh                             # 环境检查、构建、启动、回放入口
 │
@@ -32,6 +32,8 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   │   ├── include/ft_detector/
 │   │   │   ├── armor_candidate.hpp    # 两种识别方式共用的内部候选类型
 │   │   │   ├── traditional_detector.hpp
+│   │   │   ├── traditional_roi.hpp   # 传统检测的带时间上下文 ROI 封装
+│   │   │   ├── roi.hpp               # 共用 ROI 参数、状态和绘图接口
 │   │   │   ├── pnp_solver.hpp
 │   │   │   ├── pose_history.hpp       # 上一帧位姿参考和唯一几何匹配
 │   │   │   ├── detection_output.hpp   # ROS 检测消息和 TF 的共同输出接口
@@ -87,7 +89,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │           └── vision.rviz
 │
 ├── bonus/
-│   ├── README.md                     # 两个附加模块的入口
+│   ├── README.md                     # 附加模块的入口
 │   ├── gui/
 │   │   ├── README.md                 # 为什么做、做了什么、使用方法
 │   │   └── ft_rqt_gui/               # rqt GUI 与 RViz 视角同步插件包
@@ -116,21 +118,32 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   │               ├── image_view.py
 │   │               ├── parameter_view.py
 │   │               └── tuning.py
-│   └── rotation_prediction/
-│       ├── README.md                 # Before、Change、After 与 T 秒后结果
-│       ├── ft_selector/              # 旋转算法包，src 下保留相对链接
+│   ├── rotation_prediction/
+│   │   ├── README.md                 # Before、Change、After 与 T 秒后结果
+│   │   ├── ft_selector/              # 旋转算法包，src 下保留相对链接
+│   │   │   ├── CMakeLists.txt
+│   │   │   ├── package.xml
+│   │   │   ├── cfg/Selector.cfg      # 旋转 Q/R、关联门限和 T
+│   │   │   ├── include/ft_selector/
+│   │   │   │   ├── rotating_tracker.hpp
+│   │   │   │   └── target_selector.hpp
+│   │   │   └── src/
+│   │   │       ├── rotating_tracker.cpp # 十一维 EKF 与两组半径、高度
+│   │   │       ├── target_selector.cpp # 未来选板
+│   │   │       └── selector_node.cpp # Target、预测元数据和 marker
+│   │   ├── tools/reproject_predictions.py # 独立预测板投影
+│   │   └── images/                   # 实际截图及后续观测的对照图
+│   └── detection_improvements/
+│       ├── README.md                 # Before、Change、After 与复现方法
+│       ├── include/detection_improvements/roi_planner.hpp
+│       ├── src/
+│       │   ├── roi_planner.cpp        # 共用建域、搜索、确认与恢复
+│       │   └── traditional_roi.cpp    # 传统裁剪检测、原图坐标和掩膜还原
+│       ├── tools/
 │       │   ├── CMakeLists.txt
-│       │   ├── package.xml
-│       │   ├── cfg/Selector.cfg      # 旋转 Q/R、关联门限和 T
-│       │   ├── include/ft_selector/
-│       │   │   ├── rotating_tracker.hpp
-│       │   │   └── target_selector.hpp
-│       │   └── src/
-│       │       ├── rotating_tracker.cpp # 十一维 EKF 与两组半径、高度
-│       │       ├── target_selector.cpp # 未来选板
-│       │       └── selector_node.cpp # Target、预测元数据和 marker
-│       ├── tools/reproject_predictions.py # 独立预测板投影
-│       └── images/                   # 实际截图及后续观测的对照图
+│       │   ├── benchmark_nn.cpp       # 独立阶段计时、检测与 PnP 等价检查
+│       │   └── tune_cpu.py            # 固定素材采样、三轮线程遍历与汇总
+│       └── images/                   # 实际 rqt 工作区对比截图
 │
 ├── tools/                            # 开发辅助工具，不参与在线算法
 │   ├── README.md                    # 独立性能工具的构建、参数和统计范围
@@ -184,7 +197,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 |---|---|---|
 | [docs/PLAN.md](PLAN.md) | 原实施计划，归档保留，后续不再更新 | 全程 |
 | [README.md](../README.md) | 环境、构建、运行、仓库结构和按题目组织的实现说明 | 全程 |
-| [ai_usage.md](../ai_usage.md) | 关键 AI 辅助和本人项目决策 | 全程 |
+| [ai_usage.md](../ai_usage.md) | 关键 AI 辅助和我的项目决策 | 全程 |
 | [.gitignore](../.gitignore) | 忽略素材、依赖缓存和生成结果 | 1.1 |
 | [run.sh](../run.sh) | 加载环境，提供构建、基准、对比、完整链路、回放和 GUI 入口 | 1.1、1.4、7.1、10.1～10.3、附加题 |
 | [docs/file_guide.md](file_guide.md) | 项目结构、当前文件用途及任务归属 | 全程 |
@@ -234,7 +247,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [src/ft_bringup/launch/detector.launch](../src/ft_bringup/launch/detector.launch) | 依次加载公共/数据集配置并启动检测节点 | 1.4 |
 | [src/ft_bringup/launch/tracker.launch](../src/ft_bringup/launch/tracker.launch) | 加载跟踪参数并启动跟踪节点 | 6.5 |
 | [src/ft_bringup/launch/visualization.launch](../src/ft_bringup/launch/visualization.launch) | 分别控制图像、RViz 和动态调参窗口 | 1.4、7.1 |
-| [src/ft_bringup/config/detector.yaml](../src/ft_bringup/config/detector.yaml) | 公共话题、队列、HSV、几何、尺寸和 PnP 参数 | 1～5 |
+| [src/ft_bringup/config/detector.yaml](../src/ft_bringup/config/detector.yaml) | 公共话题、队列、HSV、几何、尺寸、PnP 和传统 ROI 参数 | 1～5、附加题 |
 | [src/ft_bringup/config/tracker.yaml](../src/ft_bringup/config/tracker.yaml) | Q/R、初始方差、关联/丢失门限、T 和 marker 参数 | 5.1、6.1～6.5 |
 | [src/ft_bringup/config/datasets/blue_1.yaml](../src/ft_bringup/config/datasets/blue_1.yaml) | blue_1 的 bag 文件名，沿用公共相机入口 | 1.4 |
 | [src/ft_bringup/config/datasets/blue_guard.yaml](../src/ft_bringup/config/datasets/blue_guard.yaml) | blue_guard 的 bag 文件名，沿用公共相机入口 | 1.4 |
@@ -275,7 +288,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 
 | 文件 | 用途 |
 |---|---|
-| [bonus/README.md](../bonus/README.md) | 两个附加模块的说明入口 |
+| [bonus/README.md](../bonus/README.md) | 附加模块的说明入口 |
 | [bonus/gui/README.md](../bonus/gui/README.md) | GUI 目标、操作、调用关系、AI 辅助与限制 |
 | [src/ft_rqt_gui](../src/ft_rqt_gui) | 指向 bonus 包的相对符号链接，仅用于 catkin 包发现 |
 | [package.xml](../bonus/gui/ft_rqt_gui/package.xml) | GUI、ROS、调参依赖及插件导出 |
@@ -312,5 +325,22 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [bonus/rotation_prediction/README.md](../bonus/rotation_prediction/README.md) | Before / Change / After、实际观察、测量方法与限制 |
 | [src/ft_selector](../src/ft_selector) | 指向附加题旋转算法包的 catkin 入口，保持原包名 |
 | [prediction_overlay.png](../bonus/rotation_prediction/images/prediction_overlay.png) | 当前模型板与未来板的真实 GUI 截图 |
-| [red_1_3_workspace_comparison.png](../bonus/rotation_prediction/images/red_1_3_workspace_comparison.png) | 本人提供的录屏截图，展示两组板高度差的视觉改善 |
+| [red_1_3_workspace_comparison.png](../bonus/rotation_prediction/images/red_1_3_workspace_comparison.png) | 我提供的录屏截图，展示两组板高度差的视觉改善 |
 | [images/](../bonus/rotation_prediction/images/) | red_1_3、blue_1 的 T 秒后对照图，及 blue_guard 的运动相机失败样本 |
+
+## 识别改进附加题材料
+
+| 文件 | 用途 |
+|---|---|
+| [README.md](../bonus/detection_improvements/README.md) | 改进前后行为、精确片段、线程结果与复现方法 |
+| [roi.hpp](../src/ft_detector/include/ft_detector/roi.hpp) | 两种检测方式共用的搜索参数、状态、校验和绘图接口 |
+| [traditional_roi.hpp](../src/ft_detector/include/ft_detector/traditional_roi.hpp) | 保留原全图检测接口，额外提供带图像时间和坐标系的传统 ROI 封装 |
+| [roi_planner.hpp](../bonus/detection_improvements/include/detection_improvements/roi_planner.hpp) | 独立于 ROS 和 NN 的区域规划接口，可按检测方式设置确认策略 |
+| [roi_planner.cpp](../bonus/detection_improvements/src/roi_planner.cpp) | 多目标区域合并、全图发现、短遮挡记忆、独立可信区与搜索恢复 |
+| [traditional_roi.cpp](../bonus/detection_improvements/src/traditional_roi.cpp) | 调用原传统检测器，将角点、灯条、调试几何和掩膜恢复到原图 |
+| [CMakeLists.txt](../bonus/detection_improvements/tools/CMakeLists.txt) | 独立构建 CPU 线程基准，不向业务节点加入计时 |
+| [benchmark_nn.cpp](../bonus/detection_improvements/tools/benchmark_nn.cpp) | 缓存输入的分阶段计时，以及保留候选和 PnP 的等价性检查 |
+| [tune_cpu.py](../bonus/detection_improvements/tools/tune_cpu.py) | 四份素材取样、随机顺序三轮测试、基准穿插与实测配置选择 |
+| [red_1_3_size_earlier_frame.png](../bonus/detection_improvements/images/red_1_3_size_earlier_frame.png) | 我截取的较早帧，两侧 1 号板均判为大板，与后续侧向帧对照 |
+| [red_1_3_size_roi_comparison.png](../bonus/detection_improvements/images/red_1_3_size_roi_comparison.png) | 同帧侧向 1 号板的 SMALL→LARGE 纠正，实际 Qt 控制台截图 |
+| [red_4_traditional_roi_comparison.png](../bonus/detection_improvements/images/red_4_traditional_roi_comparison.png) | 与我提供的反光截图同帧的真实 GUI 对比，传统 ROI 排除下方地面误检 |

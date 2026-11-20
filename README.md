@@ -18,10 +18,11 @@ vision_final_test/
 │   └── ft_rqt_gui -> ../bonus/gui/ft_rqt_gui
 ├── bonus/
 │   ├── gui/            # rqt 调试控制台
-│   └── rotation_prediction/ # 旋转预测改进、投影工具与对照结果
+│   ├── rotation_prediction/ # 旋转预测改进、投影工具与对照结果
+│   └── detection_improvements/ # NN 板型、传统/NN 动态 ROI 与线程优化
 ├── tools/              # 资源准备、性能统计和辅助对比
 ├── docs/               # 文件介绍、学习问答和结果配图
-├── ai_usage.md         # AI 辅助范围与本人决策
+├── ai_usage.md         # AI 辅助范围与我的决策
 ├── README.md           # 构建与使用入口
 └── run.sh              # 环境准备、构建、启动和回放
 ```
@@ -51,7 +52,7 @@ vision_final_test/
 ./run.sh gui
 ```
 
-控制台可选择素材、模式、倍率和功能，支持传统／NN 对比及 Baseline／Candidate 跨工作区对比；图像和参数同窗显示，RViz 可双窗联动。操作与限制见 [GUI 说明](bonus/gui/README.md)，两个附加模块见 [bonus 目录](bonus/README.md)。
+控制台可选择素材、模式、倍率和功能，支持传统／NN 对比及 Baseline／Candidate 跨工作区对比；图像和参数同窗显示，RViz 可双窗联动。操作与限制见 [GUI 说明](bonus/gui/README.md)，附加模块见 [bonus 目录](bonus/README.md)。
 
 下面保留命令行启动方式。
 
@@ -124,6 +125,8 @@ rosbag play --clock task/red_4.bag --topics /hk_camera/image_raw/compressed /hk_
 
 一帧中的多个候选均保留，按位置排序分配帧内 ID。识别框、ID 和大小显示在 `/ft/debug/image`；`debug_details: true` 可显示灯条下标和拒绝原因。传统模式另发布 `/ft/debug/mask/blue`、`/ft/debug/mask/red` 两路 HSV 掩膜。
 
+传统模式默认启用多目标动态 ROI：全图确认目标后局部跟随，并定期全图发现新目标，丢失时恢复搜索。配置位于 `detector.yaml` 的 `traditional/roi`，关闭后恢复全图检测。调试几何和掩膜保持原图坐标及尺寸，未搜索区域的掩膜为黑色。`red_4` 固定连续片段中，反光误检从 29 帧降到 0 帧，真板检出数保持一致；方法、截图及限制见 [识别改进](bonus/detection_improvements/README.md#传统-roi-的反光对照)。
+
 ## 第三点：位姿解算与 TF
 
 采用定义一：一对灯条的四个端点，顺序为左上、右上、右下、左下。装甲板原点在四点中心，X 沿板向右、Y 沿板向下、Z=X×Y 指向板背后；相机光学系为 x 右、y 下、z 前，均为右手系。
@@ -182,13 +185,15 @@ rosrun rqt_reconfigure rqt_reconfigure
 
 ## 第六点：单目标平移跟踪与提前量
 
-[tracker.yaml](src/ft_bringup/config/tracker.yaml) 配置六维匀速卡尔曼滤波：状态为位置和速度，dt 来自图像时间戳。Q 采用随 dt 积分的白加速度噪声，q=2 m²/s³；R 为 0.0025 m²（位置标准差 5 cm），关联距离门限为 0.5 m。
+[tracker.yaml](src/ft_bringup/config/tracker.yaml) 配置六维匀速卡尔曼滤波：状态为位置和速度，dt 来自图像时间戳。Q 采用随 dt 积分的白加速度噪声，表示对预测的不确定性，q=2 m²/s³；R 为 0.0025 m²（位置标准差 5 cm），表示对观测的不确定性。关联距离门限为 0.5 m。
 
-这些是试验初值：q 用于允许短时加减速，R 以 5 cm 的位置噪声作初始假设，0.5 m 门限用于容纳相邻帧预测误差，同时按颜色与大小限制关联。它们尚未由实测噪声或标注数据标定；误关联时应结合目标速度与检测抖动收紧门限。
+q 用于允许短时加减速，R 以 5 cm 的位置噪声作初始假设，0.5 m 门限用于容纳相邻帧预测误差，同时按颜色与大小限制关联。
 
 首次选最近目标，之后在预测位置附近关联并保持锁定；漏检时 `tracking=false`，超过 0.5 s 删除。`id=0` 表示无轨迹，正 ID 表示已有轨迹；轨迹 ID 与帧内检测 ID 不同。`position_predict=position+T*velocity`，默认 T=0.1 s。
 
 `/ft/track` 发布 ft_msgs/Track，包含轨迹 ID、命中标志、位置、速度和提前量位置。`/ft/debug/marker` 显示绿色当前位置、橙色未来位置及连线，纯预测时标记变淡。位置单位为 m，速度为 m/s，T 为 s。相机运动、同类目标交叉和旋转换板可能影响关联。
+
+动态调参实验中，我观察到：调大 q 后，预测更激进、抖动增大；调大 R 后，预测响应变迟钝；调大关联距离门限后，预测小球更容易乱跳。本次实验中，q=2 m²/s³、R=0.0025 m²、关联距离门限约 0.5 m 时，预测较稳定。
 
 下图为 red_4 运动片段的 RViz Marker 界面，订阅 `/ft/debug/marker`。绿色球为当前估计位置，橙色球为 T=0.1 s 的预测位置，橙线连接两者。
 
@@ -214,11 +219,13 @@ rosrun rqt_reconfigure rqt_reconfigure
 
 颜色和编号分别取最高分类，只有胜出颜色为红或蓝才继续筛选。四点按 0/3/2/1 重排为公共点序，减去补边后除以实际横纵缩放比例还原到原图，再接入共用 PnP 和跟踪。
 
-默认颜色/编号分数门限为 0.5/0.5，乘积门限 0.25；取最高分的至多 300 个合法候选，按四点外接框做跨类别 NMS，IoU 门限 0.5。大小分类使用公共几何规则。模型原件、派生模型及哈希清单位于 assets/models/，派生仅改变节点顺序。
+默认颜色/编号分数门限为 0.5/0.5，乘积门限 0.25；取最高分的至多 300 个合法候选，按四点外接框做跨类别 NMS，IoU 门限 0.5。大小分类先使用公共几何规则，再按下文编号策略修正。模型原件、派生模型及哈希清单位于 assets/models/，派生仅改变节点顺序。
+
+NN 在几何判型之后可使用高置信编号修正大小板，并通过多目标动态 ROI 搜索；角点始终恢复为原图坐标。编号仍在调试图显示，未新增消息或跟踪编号约束。两个功能在 model.yaml 中独立配置，具体规则、改善片段、线程测量与使用方式见 [NN 识别改进](bonus/detection_improvements/README.md)。
 
 上文的 run.sh compare 同时启动两种检测，发布 `/ft/debug/comparison` 同帧拼图，左传统、右 NN；正式链路只使用 mode 选中的结果。耗时统计见[性能工具说明](tools/README.md)。
 
-素材包两张样例图在默认阈值下的结果如下。这里统计通过 PnP 的有效检测数，仅说明这两张图的输出，不作为全段识别准确率。
+以下保留原全图检测配置、默认分数门限下的两张样例结果。这里统计通过 PnP 的有效检测数，仅说明这两张图的输出，不作为全段识别准确率。
 
 | 样例 | 传统方法 | 神经网络 |
 |---|---:|---:|
@@ -269,6 +276,8 @@ T 秒后的精度需把 t 时刻保存的预测与 t+T 图像对齐，不能用�
 独立基准复用现有算法库，统计各阶段耗时的平均值与 P95。构建、运行、CSV 字段和计时范围见 [tools/README.md](tools/README.md)。
 
 实测环境为 Intel Core i7-14650HX、Ubuntu 20.04 Noetic 容器、OpenCV 4.2.0 和 ONNX Runtime 1.22.0 CPU。OpenCV 与 ORT intra-op 各 2 线程，ORT inter-op 为 1；原始 red_4 从第 20 秒起处理 1 s，每种模式 100 帧，首帧计入。
+
+下表保留改进前固定 2 线程的串行基准；本轮线程优化的独立测量见 [NN 附加题](bonus/detection_improvements/README.md#after)。
 
 | 模式 | 检测平均 ms | 检测 P95 ms | 串行总平均 ms | 串行总 P95 ms |
 |---|---:|---:|---:|---:|

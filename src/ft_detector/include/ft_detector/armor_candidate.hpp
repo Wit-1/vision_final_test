@@ -16,6 +16,10 @@ struct ArmorCandidate {
   cv::Point2f center;
   float confidence = 0.0F;  // 传统为几何评分；NN 为颜色分数×编号分数，均非标定概率。
   int number_class = -1;  // 神经网络编号类别 0..8；-1 为传统模式，独立于帧内 id。
+  float number_score = 0.0F;
+  float number_margin = 0.0F;
+  bool size_from_number = false;  // 仅说明板型依据，不作为跨帧关联条件。
+  bool geometric_large = false;
 };
 
 }  // namespace ft_detector

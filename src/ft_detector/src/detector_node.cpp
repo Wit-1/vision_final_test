@@ -26,6 +26,7 @@
 #include "ft_detector/pnp_solver.hpp"
 #include "ft_detector/pose_history.hpp"
 #include "ft_detector/traditional_detector.hpp"
+#include "ft_detector/traditional_roi.hpp"
 #include "ft_detector/tuning_parameters.hpp"
 
 // 检测节点负责 ROS 接入和组织调用，算法由独立类实现。
@@ -42,7 +43,7 @@ class DetectorNode {
     const auto detection_topic = requiredParam<std::string>("detection_topic");
     debug_details_ = requiredParam<bool>("debug_details");
     traditional_params_ = loadTraditionalParams();
-    detector_.reset(new ft_detector::TraditionalDetector(traditional_params_));
+    detector_.reset(new ft_detector::TraditionalRoiDetector(traditional_params_, loadRoiParams("traditional/roi")));
     initializeModels();
     // 设置 PnP、TF 子系名称和跨帧选解历史。
     pnp_enabled_ = requiredParam<bool>("pnp/enabled");
@@ -141,6 +142,21 @@ class DetectorNode {
     return params;
   }
 
+  // 两种检测方式共用搜索时序；留白和最小窗口分别由自己的 YAML 决定。
+  ft_detector::RoiParams loadRoiParams(const std::string& prefix) const {
+    ft_detector::RoiParams params;
+    params.enabled = requiredParam<bool>(prefix + "/enabled");
+    params.search_interval_s = requiredParam<double>(prefix + "/search_interval_s");
+    params.max_history_gap_s = requiredParam<double>(prefix + "/max_history_gap_s");
+    params.horizontal_padding = requiredParam<double>(prefix + "/horizontal_padding");
+    params.vertical_padding = requiredParam<double>(prefix + "/vertical_padding");
+    params.min_width = requiredParam<int>(prefix + "/min_width");
+    params.min_height = requiredParam<int>(prefix + "/min_height");
+    params.confirmation_searches = requiredParam<int>(prefix + "/confirmation_searches");
+    params.max_misses = requiredParam<int>(prefix + "/max_misses");
+    return params;
+  }
+
   // 读取大小板尺寸、临时尺寸开关以及深度、重投影和绘轴门限。
   ft_detector::PnpParams loadPnpParams() const {
     const auto dimensions = [this](const std::string& name) {
@@ -166,7 +182,9 @@ class DetectorNode {
     mode_ = requiredParam<std::string>("mode");
     if (mode_ != "tradition" && mode_ != "nn")
       throw std::invalid_argument("mode must be tradition or nn");
-    const int threads = requiredParam<int>("processing_threads");
+    int threads = requiredParam<int>("processing_threads");
+    if (mode_=="nn" && private_nh_.hasParam("nn/processing_threads"))
+      threads=requiredParam<int>("nn/processing_threads");
     if (threads <= 0) throw std::invalid_argument("Invalid processing thread count");
     cv::setNumThreads(threads);
     // 模型路径、协议和筛选参数与传统模式共用的几何参数在此对齐。
@@ -182,6 +200,18 @@ class DetectorNode {
     nn_params_.thresholds = {requiredParam<double>("tuning/nn_min_color_score"),
         requiredParam<double>("tuning/nn_min_number_score"), requiredParam<double>("tuning/nn_min_confidence"),
         requiredParam<double>("tuning/nn_nms_iou")};
+    // 编号辅助仍只在 NN 内部使用，不参与跟踪关联。
+    auto& policy=nn_params_.size_policy;
+    policy.enabled=requiredParam<bool>("nn/number_size/enabled");
+    policy.min_score=requiredParam<double>("nn/number_size/min_score");
+    policy.min_margin=requiredParam<double>("nn/number_size/min_margin");
+    const auto sizes=requiredParam<std::vector<int>>("nn/number_size/class_sizes");
+    if (sizes.size()!=policy.class_sizes.size()) throw std::invalid_argument("Expected nine number-size rules");
+    std::copy(sizes.begin(),sizes.end(),policy.class_sizes.begin());
+    auto& roi=nn_params_.roi;
+    static_cast<ft_detector::RoiParams&>(roi)=loadRoiParams("nn/roi");
+    roi.seed_number_score=requiredParam<double>("nn/roi/seed_number_score");
+    roi.seed_number_margin=requiredParam<double>("nn/roi/seed_number_margin");
     ft_detector::NnDetector::validateParams(nn_params_);
     if (mode_ == "nn") {
       nn_detector_.reset(new ft_detector::NnDetector(nn_params_));
@@ -226,8 +256,9 @@ class DetectorNode {
         active_tuning_ = config;
         // 检测条件改变后，旧像素对应的 PnP 历史不再继续使用。
         if (changed) {
+          detector_->resetHistory();
           pose_history_->reset();
-          ROS_INFO("Detector tuning applied; previous PnP references cleared");
+          ROS_INFO("Detector tuning applied; previous ROI and PnP references cleared");
         }
       } catch (const std::invalid_argument& error) {
         // 将整个请求恢复为上一组有效值，同时反馈给调参界面。
@@ -336,6 +367,8 @@ class DetectorNode {
       // 编码相同时共享解码后的像素；压缩解码和发布输出仍有各自的数据分配。
       const auto shared_image = cv_bridge::toCvShare(message, sensor_msgs::image_encodings::BGR8);
       if (shared_image->image.empty()) {
+        detector_->resetHistory();
+        if (nn_detector_) nn_detector_->resetHistory();
         pose_history_->reset();
         ROS_WARN_THROTTLE(1.0, "Empty image received; frame skipped");
         return;
@@ -352,8 +385,9 @@ class DetectorNode {
 
       // 仅运行选中模式，随后接入共用的位姿和发布流程。
       ft_detector::DetectionResult result;
-      if (mode_ == "tradition") result = detector_->detect(shared_image->image);
-      else result.armors = nn_detector_->detect(shared_image->image);
+      if (mode_ == "tradition") result = detector_->detect(
+          shared_image->image, message->header.stamp.toSec(), message->header.frame_id);
+      else result.armors = nn_detector_->detect(shared_image->image,message->header.stamp.toSec(),message->header.frame_id);
       const auto evaluation = estimatePoses(result.armors, message->header.stamp.toSec(), calibration_ready);
       const auto& poses = evaluation.poses;
       const auto& pnp_status = evaluation.status;
@@ -365,6 +399,7 @@ class DetectorNode {
       auto annotated = ft_detector::drawDetections(shared_image->image, result, debug_details_);
       ft_detector::drawPoses(annotated, poses, pnp_status, debug_details_);
       labelMode(annotated, mode_);
+      ft_detector::drawRoiDebug(annotated, nn_detector_ ? nn_detector_->debugState() : detector_->debugState());
       debug_publisher_.publish(cv_bridge::CvImage(
           message->header, sensor_msgs::image_encodings::BGR8, annotated).toImageMsg());
       if (mode_ == "tradition") {
@@ -386,12 +421,18 @@ class DetectorNode {
                                                      << (calibration_ready ? "ready" : "unavailable"));
     } catch (const cv_bridge::Exception& error) {
       // 本帧处理失败时清理参考，避免下一帧使用失效的姿态历史。
+      detector_->resetHistory();
+      if (nn_detector_) nn_detector_->resetHistory();
       pose_history_->reset();
       ROS_ERROR_STREAM("Image conversion failed: " << error.what());
     } catch (const cv::Exception& error) {
+      detector_->resetHistory();
+      if (nn_detector_) nn_detector_->resetHistory();
       pose_history_->reset();
       ROS_ERROR_STREAM("OpenCV image processing failed: " << error.what());
     } catch (const std::exception& error) {
+      detector_->resetHistory();
+      if (nn_detector_) nn_detector_->resetHistory();
       pose_history_->reset();
       ROS_ERROR_STREAM("Detection output failed: " << error.what());
     }
@@ -404,7 +445,7 @@ class DetectorNode {
   image_transport::Publisher debug_publisher_;
   image_transport::Publisher blue_mask_publisher_, red_mask_publisher_;
   ros::Publisher detection_publisher_;
-  std::unique_ptr<ft_detector::TraditionalDetector> detector_;
+  std::unique_ptr<ft_detector::TraditionalRoiDetector> detector_;
   ft_detector::TraditionalParams traditional_params_;
   std::unique_ptr<ft_detector::NnDetector> nn_detector_;
   ft_detector::NnParams nn_params_;
