@@ -211,6 +211,8 @@ ft_selector::RotatingParams rotatingParams(const YAML::Node& config) {
   params.circle = {required<double>(config, "radius_m"), required<int>(config, "plate_count")};
   params.position_gate_m = required<double>(config, "association_position_m");
   params.yaw_gate_rad = required<double>(config, "association_yaw_rad");
+  params.switch_cost_margin = required<double>(config, "association_hysteresis/cost_margin");
+  params.switch_cooldown_s = required<double>(config, "association_hysteresis/cooldown_s");
   params.lost_timeout_s = required<double>(config, "lost_timeout_s");
   params.linear_noise_density = required<double>(config, "linear_noise_density");
   params.angular_noise_density = required<double>(config, "angular_noise_density");

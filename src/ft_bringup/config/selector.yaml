@@ -18,6 +18,9 @@ geometry:
   min_observations: 10
 association_position_m: 0.40
 association_yaw_rad: 0.70
+association_hysteresis:
+  cost_margin: 0.01          # Required absolute improvement in normalized cost.
+  cooldown_s: 0.02          # Image time; bypassed when the current slot has no legal match.
 lost_timeout_s: 0.5
 
 linear_noise_density: 2.0      # m^2/s^3

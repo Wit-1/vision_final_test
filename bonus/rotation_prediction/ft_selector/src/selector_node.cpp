@@ -87,6 +87,8 @@ class SelectorNode {
     params.circle.plate_count = required<int>("plate_count");
     params.position_gate_m = required<double>("association_position_m");
     params.yaw_gate_rad = required<double>("association_yaw_rad");
+    params.switch_cost_margin = required<double>("association_hysteresis/cost_margin");
+    params.switch_cooldown_s = required<double>("association_hysteresis/cooldown_s");
     params.lost_timeout_s = required<double>("lost_timeout_s");
     params.linear_noise_density = required<double>("linear_noise_density");
     params.angular_noise_density = required<double>("angular_noise_density");
@@ -128,6 +130,8 @@ class SelectorNode {
     active_tuning_.yaw_variance = params_.yaw_variance;
     active_tuning_.association_position_m = params_.position_gate_m;
     active_tuning_.association_yaw_rad = params_.yaw_gate_rad;
+    active_tuning_.switch_cost_margin = params_.switch_cost_margin;
+    active_tuning_.switch_cooldown_s = params_.switch_cooldown_s;
     active_tuning_.prediction_time_s = horizon_s_;
     auto clamped = active_tuning_;
     clamped.__clamp__();
@@ -143,7 +147,8 @@ class SelectorNode {
           throw std::invalid_argument("Prediction horizon must be finite and nonnegative");
         tracker_.setTuning({config.linear_noise_density, config.angular_noise_density,
                            config.position_variance, config.yaw_variance,
-                           config.association_position_m, config.association_yaw_rad});
+                           config.association_position_m, config.association_yaw_rad,
+                           config.switch_cost_margin, config.switch_cooldown_s});
         horizon_s_ = config.prediction_time_s;
         active_tuning_ = config;
       } catch (const std::invalid_argument& error) {

@@ -1,6 +1,6 @@
 # 文件介绍
 
-本文集中说明提交到 Git 的项目结构、文件用途和任务归属。学习问答见 [learning_log.md](learning_log.md)。
+本文说明纳入版本管理的项目结构、文件用途和任务归属。学习问答见 [learning_log.md](learning_log.md)。
 
 ## 项目结构
 
@@ -123,7 +123,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   │   ├── ft_selector/              # 旋转算法包，src 下保留相对链接
 │   │   │   ├── CMakeLists.txt
 │   │   │   ├── package.xml
-│   │   │   ├── cfg/Selector.cfg      # 旋转 Q/R、关联门限和 T
+│   │   │   ├── cfg/Selector.cfg      # 旋转 Q/R、关联、换板保持与冷却、T
 │   │   │   ├── include/ft_selector/
 │   │   │   │   ├── rotating_tracker.hpp
 │   │   │   │   └── target_selector.hpp
@@ -157,7 +157,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │   └── comparison.launch           # 对比工具启动入口
 │
 └── docs/
-    ├── PLAN.md                       # 原实施计划，归档后不再更新
+    ├── PLAN.md                       # 原实施计划归档
     ├── file_guide.md                 # 项目结构、文件用途和任务归属
     ├── images/
     │   ├── nn_corner_definition_check.png # NN 选点定义的临时实验结果图
@@ -180,7 +180,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 - `.hpp` 声明类型和接口，`.cpp` 实现算法；节点文件负责 ROS 通信和组织调用。
 - `ft_bringup` 管理配置与启动；检测、滤波和选板算法放在各自业务包内。
 - 两种检测方式返回相同的 `ArmorCandidate`，随后使用同一个 PnP 和消息发布流程。
-- 辅助工具集中在 tools 和 bonus；旋转算法位于 bonus/rotation_prediction/ft_selector，通过 src 的相对链接接入。自动验证脚本使用后清理，对照结果作为附加题材料保留。
+- 辅助工具集中在 tools 和 bonus；旋转算法位于 bonus/rotation_prediction/ft_selector，通过 src 的相对链接接入。对照结果作为附加题材料保留。
 
 工作空间与环境约定：
 
@@ -189,18 +189,17 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 - `run.sh` 明确加载 Noetic 和本项目环境，避免父工作空间的自动 source 干扰。
 - 本项目使用独立 Git 仓库，按自身忽略规则管理素材和生成文件。
 - `run.sh` 提供入口，README 同时写明实际执行的命令，便于理解和排错。
-- README 等提交文档使用通用 Noetic 环境说明和项目相对路径，不依赖个人绝对路径或外层环境的专用启动脚本。
 
 ## 文件用途与任务归属
 
 | 文件 | 用途 | 任务归属 |
 |---|---|---|
-| [docs/PLAN.md](PLAN.md) | 原实施计划，归档保留，后续不再更新 | 全程 |
+| [docs/PLAN.md](PLAN.md) | 原实施计划归档 | 全程 |
 | [README.md](../README.md) | 环境、构建、运行、仓库结构和按题目组织的实现说明 | 全程 |
 | [ai_usage.md](../ai_usage.md) | 关键 AI 辅助和我的项目决策 | 全程 |
 | [.gitignore](../.gitignore) | 忽略素材、依赖缓存和生成结果 | 1.1 |
 | [run.sh](../run.sh) | 加载环境，提供构建、基准、对比、完整链路、回放和 GUI 入口 | 1.1、1.4、7.1、10.1～10.3、附加题 |
-| [docs/file_guide.md](file_guide.md) | 项目结构、当前文件用途及任务归属 | 全程 |
+| [docs/file_guide.md](file_guide.md) | 项目结构、文件用途及任务归属 | 全程 |
 | [docs/learning_log.md](learning_log.md) | 项目相关的实际学习问答及必要纠正 | 全程 |
 | [docs/images/nn_corner_definition_check.png](images/nn_corner_definition_check.png) | 模型输出四点与灯条端点的放大对照，供 Task8 项目决策说明使用 | 8.4 |
 | [docs/images/tf_pose_rviz.png](images/tf_pose_rviz.png) | RViz 中装甲板的父坐标系、位置及 TF 坐标轴 | 3.4 |
@@ -265,14 +264,14 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [bonus/rotation_prediction/ft_selector/CMakeLists.txt](../bonus/rotation_prediction/ft_selector/CMakeLists.txt) | 构建 Eigen 旋转算法库和 ROS 节点 | 9.3～9.5 |
 | [bonus/rotation_prediction/ft_selector/package.xml](../bonus/rotation_prediction/ft_selector/package.xml) | 旋转选板包与 ROS、Eigen 依赖 | 9.3～9.5 |
 | [bonus/rotation_prediction/ft_selector/include/ft_selector/rotating_tracker.hpp](../bonus/rotation_prediction/ft_selector/include/ft_selector/rotating_tracker.hpp) | 两组几何、观测、十一维状态、估计不确定性和滤波接口 | 9.1～9.4 |
-| [bonus/rotation_prediction/ft_selector/src/rotating_tracker.cpp](../bonus/rotation_prediction/ft_selector/src/rotating_tracker.cpp) | 圆周几何、角度环绕、旋转 EKF、换板关联和生命周期 | 9.1～9.4 |
+| [bonus/rotation_prediction/ft_selector/src/rotating_tracker.cpp](../bonus/rotation_prediction/ft_selector/src/rotating_tracker.cpp) | 圆周几何、旋转 EKF、各槽位最佳关联、代价保持、换板冷却和生命周期 | 9.1～9.4、附加题 |
 | [bonus/rotation_prediction/ft_selector/include/ft_selector/target_selector.hpp](../bonus/rotation_prediction/ft_selector/include/ft_selector/target_selector.hpp) | 选板接口、当前位置和未来位置 | 9.5 |
 | [bonus/rotation_prediction/ft_selector/src/target_selector.cpp](../bonus/rotation_prediction/ft_selector/src/target_selector.cpp) | 用未来相位和朝向选板，设置目标有效标志 | 9.5 |
 | [bonus/rotation_prediction/ft_selector/src/selector_node.cpp](../bonus/rotation_prediction/ft_selector/src/selector_node.cpp) | 从检测位姿提取朝向，发布 Target 和 RViz marker | 9.1、9.4、9.5 |
-| [bonus/rotation_prediction/ft_selector/cfg/Selector.cfg](../bonus/rotation_prediction/ft_selector/cfg/Selector.cfg) | 旋转 EKF 噪声、位置/角度门限和提前量的动态字段 | 5.2、9.3～9.5 |
+| [bonus/rotation_prediction/ft_selector/cfg/Selector.cfg](../bonus/rotation_prediction/ft_selector/cfg/Selector.cfg) | 旋转 EKF 噪声、位置/角度门限、换板优势与冷却时间、提前量的动态字段 | 5.2、9.3～9.5、附加题 |
 | [src/ft_msgs/msg/Target.msg](../src/ft_msgs/msg/Target.msg) | 车体 ID、有效标志、当前板及未来板位置 | 9.5 |
 | [src/ft_msgs/msg/PredictionDebug.msg](../src/ft_msgs/msg/PredictionDebug.msg) | 源时间、预测时间、实际 T、板位姿、尺寸和半径/高度差估计 | 9.5、附加改进 |
-| [src/ft_bringup/config/selector.yaml](../src/ft_bringup/config/selector.yaml) | 圆周半径、槽位、EKF 噪声、关联和选板参数 | 9.1～9.5 |
+| [src/ft_bringup/config/selector.yaml](../src/ft_bringup/config/selector.yaml) | 圆周几何、EKF 噪声、关联、当前板保持与冷却、未来选板参数 | 9.1～9.5、附加题 |
 | [src/ft_bringup/launch/selector.launch](../src/ft_bringup/launch/selector.launch) | 启动选板并读取与单板跟踪相同的提前量 | 9.5 |
 | [tools/CMakeLists.txt](../tools/CMakeLists.txt) | 链接现有算法库，独立构建性能基准 | 10.2 |
 | [tools/README.md](../tools/README.md) | 性能工具的构建、参数、CSV 字段和统计范围 | 10.2 |
@@ -325,7 +324,8 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [bonus/rotation_prediction/README.md](../bonus/rotation_prediction/README.md) | Before / Change / After、实际观察、测量方法与限制 |
 | [src/ft_selector](../src/ft_selector) | 指向附加题旋转算法包的 catkin 入口，保持原包名 |
 | [prediction_overlay.png](../bonus/rotation_prediction/images/prediction_overlay.png) | 当前模型板与未来板的真实 GUI 截图 |
-| [red_1_3_workspace_comparison.png](../bonus/rotation_prediction/images/red_1_3_workspace_comparison.png) | 我提供的录屏截图，展示两组板高度差的视觉改善 |
+| [blue_1_hysteresis_timeline.png](../bonus/rotation_prediction/images/blue_1_hysteresis_timeline.png) | 同一缓存中原始帧率的槽位变化，展示短时反复切换的抑制 |
+| [red_1_3_workspace_comparison.png](../bonus/rotation_prediction/images/red_1_3_workspace_comparison.png) | 实际录屏截图，展示两组板高度差的视觉改善 |
 | [images/](../bonus/rotation_prediction/images/) | red_1_3、blue_1 的 T 秒后对照图，及 blue_guard 的运动相机失败样本 |
 
 ## 识别改进附加题材料
@@ -341,6 +341,6 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [CMakeLists.txt](../bonus/detection_improvements/tools/CMakeLists.txt) | 独立构建 CPU 线程基准，不向业务节点加入计时 |
 | [benchmark_nn.cpp](../bonus/detection_improvements/tools/benchmark_nn.cpp) | 缓存输入的分阶段计时，以及保留候选和 PnP 的等价性检查 |
 | [tune_cpu.py](../bonus/detection_improvements/tools/tune_cpu.py) | 四份素材取样、随机顺序三轮测试、基准穿插与实测配置选择 |
-| [red_1_3_size_earlier_frame.png](../bonus/detection_improvements/images/red_1_3_size_earlier_frame.png) | 我截取的较早帧，两侧 1 号板均判为大板，与后续侧向帧对照 |
+| [red_1_3_size_earlier_frame.png](../bonus/detection_improvements/images/red_1_3_size_earlier_frame.png) | 较早帧两侧 1 号板均判为大板，与后续侧向帧对照 |
 | [red_1_3_size_roi_comparison.png](../bonus/detection_improvements/images/red_1_3_size_roi_comparison.png) | 同帧侧向 1 号板的 SMALL→LARGE 纠正，实际 Qt 控制台截图 |
-| [red_4_traditional_roi_comparison.png](../bonus/detection_improvements/images/red_4_traditional_roi_comparison.png) | 与我提供的反光截图同帧的真实 GUI 对比，传统 ROI 排除下方地面误检 |
+| [red_4_traditional_roi_comparison.png](../bonus/detection_improvements/images/red_4_traditional_roi_comparison.png) | 真实 GUI 同帧对比，传统 ROI 排除下方地面反光误检 |
