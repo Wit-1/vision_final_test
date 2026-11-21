@@ -1,6 +1,7 @@
 #include "ft_selector/rotating_tracker.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -62,6 +63,8 @@ RotatingTracker::RotatingTracker(RotatingParams params) : params_(params) {
   if (!positive(params.circle.radius_m) || params.circle.plate_count < 2 ||
       params.circle.plate_count > 4 || !positive(params.position_gate_m) ||
       !positive(params.yaw_gate_rad) || params.yaw_gate_rad >= kPi / params.circle.plate_count ||
+      !std::isfinite(params.switch_cost_margin) || params.switch_cost_margin < 0.0 ||
+      !std::isfinite(params.switch_cooldown_s) || params.switch_cooldown_s < 0.0 ||
       !positive(params.lost_timeout_s) || !positive(params.linear_noise_density) ||
       !positive(params.angular_noise_density) || !positive(params.position_variance) ||
       !positive(params.yaw_variance) || !positive(params.initial_velocity_variance) ||
@@ -74,12 +77,14 @@ RotatingTracker::RotatingTracker(RotatingParams params) : params_(params) {
     throw std::invalid_argument("Invalid rotating tracker parameters or overlapping yaw gates");
 }
 
-// 校验六项在线字段后统一应用，当前车体估计与协方差保持不变。
+// 校验八项在线字段后统一应用，车体估计、协方差和冷却起点保持不变。
 void RotatingTracker::setTuning(const RotatingTuning& tuning) {
   if (!positive(tuning.linear_noise_density) || !positive(tuning.angular_noise_density) ||
       !positive(tuning.position_variance) || !positive(tuning.yaw_variance) ||
       !positive(tuning.position_gate_m) || !positive(tuning.yaw_gate_rad) ||
-      tuning.yaw_gate_rad >= kPi / params_.circle.plate_count)
+      tuning.yaw_gate_rad >= kPi / params_.circle.plate_count ||
+      !std::isfinite(tuning.switch_cost_margin) || tuning.switch_cost_margin < 0.0 ||
+      !std::isfinite(tuning.switch_cooldown_s) || tuning.switch_cooldown_s < 0.0)
     throw std::invalid_argument("Invalid rotating tuning or overlapping yaw gates");
   params_.linear_noise_density = tuning.linear_noise_density;
   params_.angular_noise_density = tuning.angular_noise_density;
@@ -87,12 +92,14 @@ void RotatingTracker::setTuning(const RotatingTuning& tuning) {
   params_.yaw_variance = tuning.yaw_variance;
   params_.position_gate_m = tuning.position_gate_m;
   params_.yaw_gate_rad = tuning.yaw_gate_rad;
+  params_.switch_cost_margin = tuning.switch_cost_margin;
+  params_.switch_cooldown_s = tuning.switch_cooldown_s;
 }
 
 // 结束当前车体轨迹，下一次观测建立新 ID。
 void RotatingTracker::reset() {
   id_ = 0;
-  last_stamp_ = last_observed_stamp_ = 0.0;
+  last_stamp_ = last_observed_stamp_ = last_switch_stamp_ = 0.0;
   groups_seen_ = 0;
   observation_count_ = 0;
   detection_index_ = -1;
@@ -131,7 +138,7 @@ void RotatingTracker::initialize(const ArmorObservation& observation, double sta
   groups_seen_ = 1;
   observation_count_ = 1;
   unwrapped_phase_ = min_phase_ = max_phase_ = state_[6];
-  last_stamp_ = last_observed_stamp_ = stamp;
+  last_stamp_ = last_observed_stamp_ = last_switch_stamp_ = stamp;
 }
 
 // 平移和相位按匀速推进，几何量采用小幅随机游走。
@@ -252,6 +259,12 @@ VehicleEstimate RotatingTracker::update(double stamp, const std::vector<ArmorObs
   const ArmorObservation* best = nullptr;
   int best_slot = 0;
   double best_cost = std::numeric_limits<double>::infinity();
+  // 各槽位分别保存最佳合法观测，当前板的保持以模型槽位而非帧内 ID 为依据。
+  struct SlotMatch {
+    const ArmorObservation* observation = nullptr;
+    double cost = std::numeric_limits<double>::infinity();
+  };
+  std::array<SlotMatch, 4> matches;
   for (int slot = 0; slot < params_.circle.plate_count; ++slot) {
     const auto circle = geometry();
     const double yaw = circle.platePhase(state_[6], slot);
@@ -263,6 +276,7 @@ VehicleEstimate RotatingTracker::update(double stamp, const std::vector<ArmorObs
       if (position_error > 1.0 || yaw_error > 1.0) continue;
       // 比较归一化位置和角度误差的平方和，每帧只校正一组。
       const double cost = position_error * position_error + yaw_error * yaw_error;
+      if (cost < matches[slot].cost) matches[slot] = {&observation, cost};
       if (cost < best_cost) {
         best = &observation;
         best_slot = slot;
@@ -270,9 +284,21 @@ VehicleEstimate RotatingTracker::update(double stamp, const std::vector<ArmorObs
       }
     }
   }
+  // 两项均为零时保留原规则及平局顺序；当前槽位失配时立即允许正常换板。
+  const auto& current = matches[observed_slot_];
+  if ((params_.switch_cost_margin > 0.0 || params_.switch_cooldown_s > 0.0) && current.observation) {
+    const bool cooling = stamp - last_switch_stamp_ < params_.switch_cooldown_s;
+    const bool clearly_better = best_cost + params_.switch_cost_margin < current.cost;
+    if (cooling || !clearly_better) {
+      best = current.observation;
+      best_slot = observed_slot_;
+    }
+  }
   // 换到同车另一槽位仍沿用车体 ID；漏匹配时仅保留预测。
   const bool corrected = best && correct(*best, best_slot);
   if (corrected) {
+    // 只有换板成功才重新计时；冷却期间仍对当前板执行正常校正。
+    if (best_slot != observed_slot_) last_switch_stamp_ = stamp;
     last_observed_stamp_ = stamp;
     observed_slot_ = best_slot;
     detection_index_ = best->detection_index;

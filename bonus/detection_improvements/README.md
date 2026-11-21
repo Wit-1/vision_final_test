@@ -8,7 +8,7 @@
 
 传统检测也容易把地面反光的两条亮带配成装甲板。全图搜索时，这些背景区域会反复参与配对。
 
-本轮在 `bonus/detection-improvements` 分支开发，Baseline 固定为 `1a0974e`。NN 改进编号判型、ROI 和线程配置；传统模式增加独立运行的动态 ROI。
+改进覆盖 NN 编号判型、动态 ROI 和 CPU 线程配置；传统模式使用独立运行的动态 ROI。对照基线为 `1a0974e`。
 
 ## Change
 
@@ -59,7 +59,7 @@ ROI 限制搜索范围，不负责判断物体真假。如果反光持续通过�
 
 遍历容器可用的 ORT 1～24 线程，固定输入和模型，预热后以随机顺序重复三轮，穿插 2 线程基准；再测试领先配置的 OpenCV 1／2／4 线程。选择检测和 PnP 等价的实测最优组合，结果接近时优先较少的线程。
 
-默认改为 `nn/cpu_threads: 8`、`nn/processing_threads: 2`。顶层 `processing_threads` 继续供传统模式使用，线程设置在启动时加载。
+默认配置为 `nn/cpu_threads: 8`、`nn/processing_threads: 2`。顶层 `processing_threads` 供传统模式使用，线程设置在启动时加载。
 
 策略源码位于 `include/` 和 `src/`，由原 `ft_detector` 包编译接入；测量工具独立放在 `tools/`，业务节点不加入计时统计。模型、精度类型和现有 ROS 消息定义保持不变。
 
@@ -74,7 +74,7 @@ ROI 限制搜索范围，不负责判断物体真假。如果反光持续通过�
 
 GUI 选择 NN、Workspaces，Baseline 选择固定版本的独立工作区，Candidate 选择当前项目。对比图左侧为 Baseline、右侧为 Candidate。
 
-观察传统 ROI 时，将模式改为 Traditional。`model.yaml` 中 `nn/number_size/enabled`、`nn/roi/enabled` 分别控制 NN 判型和 ROI；`detector.yaml` 中 `traditional/roi/enabled` 控制传统 ROI，关闭后恢复原全图流程。修改 YAML 后点击 `Apply / Restart`；不增加 GUI 开关，也不自动保存在线参数。
+观察传统 ROI 时，将模式改为 Traditional。`model.yaml` 中 `nn/number_size/enabled`、`nn/roi/enabled` 分别控制 NN 判型和 ROI；`detector.yaml` 中 `traditional/roi/enabled` 控制传统 ROI，关闭后恢复原全图流程。修改 YAML 后点击 `Apply / Restart` 加载，在线参数不会自动写回文件。
 
 复现线程测量：
 
@@ -98,11 +98,11 @@ python3 bonus/detection_improvements/tools/tune_cpu.py \
 
 在相邻的约 0.458～0.725 秒、23 个 1 号观测中，Baseline 有 20 次小板、3 次大板，发生一次板型切换；改进后全部为大板。使用同一套 PnP 与历史选解时，深度最大逐帧跳变量由约 0.779 m 降到 0.094 m。这是当前尺寸模型下的连续性观察，不是实物测距真值。
 
-先看我截取的较早一帧：这时 1 号板在 Baseline 和 Candidate 中都被判为 `LARGE`。
+较早帧中，1 号板在 Baseline 和 Candidate 中都被判为 `LARGE`。
 
 ![red_1_3：较早一帧，两侧 1 号板均判为大板](images/red_1_3_size_earlier_frame.png)
 
-随后 1 号板侧转，下面的实际 Qt 控制台同帧截图约在 bag 第 **0.591 秒**。左侧变为 `SMALL`，右侧仍为 `LARGE size:number`，另一块可见装甲板仍被保留。
+bag 第 **0.591 秒**的同帧截图中，1 号板已经侧转。左侧变为 `SMALL`，右侧仍为 `LARGE size:number`，另一块可见装甲板仍被保留。
 
 ![red_1_3：侧向 1 号板的 Baseline / Candidate 对比](images/red_1_3_size_roi_comparison.png)
 
@@ -123,11 +123,11 @@ python3 bonus/detection_improvements/tools/tune_cpu.py \
 
 计时分别覆盖预处理、同步 `Session::Run()` 和解码后处理。JPEG 解码、磁盘读取、PnP 等价性检查、ROS、ROI 规划和 GUI 显示不在表中；检测主体是前三项的整段用时。
 
-本次样本中，保留检测的数量、编号、颜色、板型和帧内 ID 一致，角点差与 PnP 平移差均为 0，最大旋转数值差约 0.000002°，满足既定容差。等价性针对保留检测与 PnP，不要求被筛掉的原始候选逐值相同。该线程最优结论限定于本机和本次测试负载。
+40 张样本中，保留检测的数量、编号、颜色、板型和帧内 ID 一致，角点差与 PnP 平移差均为 0，最大旋转数值差约 0.000002°，满足既定容差。等价性针对保留检测与 PnP，不要求被筛掉的原始候选逐值相同。该线程最优结论限定于本机和上述测试负载。
 
 ### 传统 ROI 的反光对照
 
-我提供的地面反光截图对应 `red_4` 约第 **9.517 秒**，图像时间戳为 `1792940253.043709302 s`。固定前后各一秒，即 **8.517～10.517 秒**，按原始帧率比较，仅开关传统 ROI，其他检测和 PnP 参数保持一致。
+`red_4` 地面反光的对照帧位于约第 **9.517 秒**，图像时间戳为 `1792940253.043709302 s`。对照范围为前后各一秒，即 **8.517～10.517 秒**，按原始帧率比较，仅开关传统 ROI，其他检测和 PnP 参数保持一致。
 
 | 连续片段，206 帧 | 全图检测 | 动态 ROI |
 |---|---:|---:|
@@ -135,14 +135,14 @@ python3 bonus/detection_improvements/tools/tune_cpu.py \
 | 真实正面板检出帧数 | 189 | **189** |
 | 真实正面板漏检帧数 | 17 | **17** |
 
-统计对象为二维装甲板候选。17 张两侧均漏检的图像已逐张查看，真实板仍可见；ROI 没有增加该片段的漏检。189 张检出真板的时间戳一致，角点最大差约 0.00019 px。片段包含 14 次全图搜索，其中两次也检测到反光，但没有连续通过确认，因此未将反光接纳为可信区域。
+统计对象为二维装甲板候选。17 张两侧均漏检的图像中，真实板均可见；ROI 没有增加该片段的漏检。189 张检出真板的时间戳一致，角点最大差约 0.00019 px。片段包含 14 次全图搜索，其中两次也检测到反光，但没有连续通过确认，因此未将反光接纳为可信区域。
 
-下面是与我提供的截图同一图像时间戳的实际 GUI 对照。左侧 Baseline 有真板与下方反光两个框，右侧 Candidate 保留真板，搜索窗口不包含地面反光。
+下图为上述时间戳的实际 GUI 对照。左侧 Baseline 有真板与下方反光两个框，右侧 Candidate 保留真板，搜索窗口不包含地面反光。
 
 ![red_4：传统全图与动态 ROI 的实际同帧对照](images/red_4_traditional_roi_comparison.png)
 
 复现时选择 Traditional、Workspaces、`red_4`，起点设为 8.3 秒，倍率 0.1，在约 9.517 秒暂停。ROI 的结果依赖此前的观测历史，直接从误检帧启动，不能保证得到相同搜索区域。
 
-四份素材已回归多目标、搜索恢复和坐标还原，GUI 的暂停、调参、循环和停止可用。共享组件整理前后，四份素材按 0.05 秒间隔取样的 NN 输出、区域状态与裁剪窗口一致。
+四份素材的多目标、搜索恢复和坐标还原检查通过，GUI 的暂停、调参、循环和停止可用。按 0.05 秒间隔取样时，共享 ROI 组件与原 NN 实现的输出、区域状态及裁剪窗口一致。
 
-我确定改进范围和验收方式，由 AI 辅助实现与验证，见 [AI 使用记录](../../ai_usage.md)。
+AI 辅助范围与方案取舍见 [AI 使用记录](../../ai_usage.md)。

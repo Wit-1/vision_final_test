@@ -25,6 +25,8 @@ struct RotatingParams {
   CircleModel circle;
   double position_gate_m = 0.0;
   double yaw_gate_rad = 0.0;
+  double switch_cost_margin = 0.01;  // Absolute improvement in the normalized association cost.
+  double switch_cooldown_s = 0.02;  // Image time; an unmatched current slot bypasses the cooldown.
   double lost_timeout_s = 0.0;
   double linear_noise_density = 0.0;
   double angular_noise_density = 0.0;
@@ -45,6 +47,7 @@ struct RotatingTuning {
   double linear_noise_density, angular_noise_density;
   double position_variance, yaw_variance;
   double position_gate_m, yaw_gate_rad;
+  double switch_cost_margin, switch_cooldown_s;
 };
 
 struct ArmorObservation {
@@ -98,6 +101,7 @@ class RotatingTracker {
   int observation_count_ = 0;
   double unwrapped_phase_ = 0.0, min_phase_ = 0.0, max_phase_ = 0.0;
   double last_stamp_ = 0.0, last_observed_stamp_ = 0.0;
+  double last_switch_stamp_ = 0.0;
 };
 
 }  // namespace ft_selector
