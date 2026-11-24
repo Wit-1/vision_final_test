@@ -31,7 +31,9 @@ EKF 通过连续的位置和朝向观测估计这三个几何量。半径 0.25 m
 
 ### 预测板重投影
 
-从当前与未来板的三维中心、朝向构造灯条四端点，再用 CameraInfo 的内参与畸变投影回图像。物理尺寸沿用当前 PnP 配置，没有重新定义一套尺寸。
+从当前与未来板的三维中心、朝向构造灯条四端点，再用 CameraInfo 的内参与畸变投影回图像。检测与选板分别加载 `armor_dimensions.yaml` 中的同一套物理尺寸，选板独立启动不依赖检测节点的参数。
+
+可用 `roslaunch ft_bringup selector.launch` 单独启动选板，输入仍为 `/ft/detection`。尺寸缺失或非法时会明确报错退出。
 
 - 紫色四边形：当前模型板。
 - 蓝色四边形：t+T 时刻选中的预测板，可能属于另一槽位。
@@ -64,6 +66,8 @@ association_hysteresis:
 ```
 
 运行时在 GUI 的 `Parameters` 页选择运行侧和 `Rotating tracking`，或在 rqt_reconfigure 中选择该侧的 `/ft_selector/tuning`：
+
+角差关联门限 `association_yaw_rad` 必须小于 `π / plate_count`，界面按当前板数发布合法上限，四板时略小于 0.7854 rad。
 
 | 动态字段 | 含义 | 范围 |
 |---|---|---|

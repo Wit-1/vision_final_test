@@ -55,6 +55,7 @@ std::pair<NnParams,PnpParams> parameters(const Options& o) {
   const auto config=o.project/"src/ft_bringup/config";
   const auto model=YAML::LoadFile((config/"model.yaml").string());
   const auto detector=YAML::LoadFile((config/"detector.yaml").string());
+  const auto sizes=YAML::LoadFile((config/"armor_dimensions.yaml").string())["pnp"];
   const auto n=model["nn"],t=model["tuning"],p=detector["pnp"];
   NnParams nn;
   nn.model_path=n["model_path"].as<std::string>();
@@ -79,10 +80,9 @@ std::pair<NnParams,PnpParams> parameters(const Options& o) {
   NnDetector::validateParams(nn);
   PnpParams pose;
   const auto dimensions=[&](const std::string& name){
-    return ArmorDimensions{p[name]["width_m"].as<double>(),p[name]["height_m"].as<double>(),p[name]["confirmed"].as<bool>()};
+    return ArmorDimensions{sizes[name]["width_m"].as<double>(),sizes[name]["height_m"].as<double>()};
   };
   pose.small=dimensions("small"); pose.large=dimensions("large");
-  pose.allow_provisional_dimensions=p["allow_provisional_dimensions"].as<bool>();
   pose.ambiguity_error_margin_px=p["continuity"]["error_margin_px"].as<double>();
   pose.min_depth_m=p["min_depth_m"].as<double>(); pose.max_depth_m=p["max_depth_m"].as<double>();
   pose.max_reprojection_error_px=p["max_reprojection_error_px"].as<double>();

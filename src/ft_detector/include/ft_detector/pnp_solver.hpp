@@ -13,7 +13,6 @@ namespace ft_detector {
 
 struct ArmorDimensions {
   double width_m, height_m;  // 灯条中心距 W、发光长度 L；不是板本体宽高。
-  bool confirmed;
 };
 
 struct PnpParams {
@@ -22,7 +21,6 @@ struct PnpParams {
   double max_reprojection_error_px;
   double min_quad_area_px2, min_edge_length_px;
   double axis_length_m;
-  bool allow_provisional_dimensions = false;  // 仅在明确采用临时模型时开启。
   double ambiguity_error_margin_px = 0.0;  // 有参考时允许比当前最优 RMS 多出的像素误差。
 };
 
@@ -43,7 +41,6 @@ struct ArmorPose {
 
 struct PnpResult {
   bool valid = false;
-  bool provisional = false;  // 合格解也可能使用了尚未实测确认的尺寸。
   bool continuity_selected = false;  // 参考历史姿态，选中了误差略大的当前帧合格分支。
   std::string reason;
   ArmorPose pose;

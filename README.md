@@ -133,7 +133,9 @@ rosbag play --clock task/red_4.bag --topics /hk_camera/image_raw/compressed /hk_
 
 PnP 使用 IPPE 求平面候选，检查正深度和重投影误差，并在有效历史存在时辅助消歧。变换为 P_camera=R×P_armor+t，TF 以相机为父系、armor_<帧内ID> 为子系，直接使用 R 和 t。重投影坐标轴为 X 红、Y 绿、Z 蓝。
 
-端点尺寸暂用小板 135×56 mm、大板 230×56 mm，参考 Alliance2026 开源参数，尚未与素材实物核对。YAML 保留 `confirmed: false` 和临时尺寸开关；`provisional` 表示采用临时尺寸模型。重投影检查通过仍不能证明实物米制精度，首次朝向仍可能存在平面双解歧义。
+端点尺寸已确认：小板 135×60 mm、大板 230×60 mm，分别对应灯条中心距与发光长度，配置单位为米。两种检测方式的 PnP 和预测板重投影共用 [armor_dimensions.yaml](src/ft_bringup/config/armor_dimensions.yaml)，检测与选板节点各自加载，支持独立启动。首次朝向仍可能存在平面双解歧义；`prior` 表示在误差接近的合格候选中，参考上一帧姿态选解。
+
+历史截图与对照统计使用原 56 mm 灯长，未按新尺寸重算。
 
 下图为原始 red_4 回放时的 RViz TF 界面，左侧显示 armor_0 的父坐标系及位置，右侧显示对应的三条坐标轴。
 
@@ -163,7 +165,7 @@ rostopic echo --filter 'len(m.detections) > 0' -n 1 /ft/detection
 
 ## 第五点：参数化与动态调参
 
-话题、传统识别及 PnP 参数位于 [detector.yaml](src/ft_bringup/config/detector.yaml)，神经网络协议、阈值和线程设置位于 [model.yaml](src/ft_bringup/config/model.yaml)。按 detector→model→数据集顺序加载，后加载的同名键覆盖前值。
+话题、传统识别及 PnP 门限位于 [detector.yaml](src/ft_bringup/config/detector.yaml)，物理尺寸位于 [armor_dimensions.yaml](src/ft_bringup/config/armor_dimensions.yaml)，神经网络协议、阈值和线程设置位于 [model.yaml](src/ft_bringup/config/model.yaml)。检测配置按 detector→armor_dimensions→model→数据集顺序加载，后加载的同名键覆盖前值。
 
 统一启动的 `reconfigure:=true` 会打开调参窗口。也可在另一个 Noetic 终端手动打开：
 
@@ -193,7 +195,7 @@ q 用于允许短时加减速，R 以 5 cm 的位置噪声作初始假设，0.5 
 
 `/ft/track` 发布 ft_msgs/Track，包含轨迹 ID、命中标志、位置、速度和提前量位置。`/ft/debug/marker` 显示绿色当前位置、橙色未来位置及连线，纯预测时标记变淡。位置单位为 m，速度为 m/s，T 为 s。相机运动、同类目标交叉和旋转换板可能影响关联。
 
-动态调参实验中，我观察到：调大 q 后，预测更激进、抖动增大；调大 R 后，预测响应变迟钝；调大关联距离门限后，预测小球更容易乱跳。在该实验条件下，q=2 m²/s³、R=0.0025 m²、关联距离门限约 0.5 m 时，预测较稳定。
+动态调参实验中，观察到：调大 q 后，预测更激进、抖动增大；调大 R 后，预测响应变迟钝；调大关联距离门限后，预测小球更容易乱跳。在该实验条件下，q=2 m²/s³、R=0.0025 m²、关联距离门限约 0.5 m 时，预测较稳定。
 
 下图为 red_4 运动片段的 RViz Marker 界面，订阅 `/ft/debug/marker`。绿色球为当前估计位置，橙色球为 T=0.1 s 的预测位置，橙线连接两者。
 
@@ -232,7 +234,7 @@ NN 在几何判型之后可使用高置信编号修正大小板，并通过多�
 | sample_1.jpg | 1 | 2 |
 | sample_2.jpg | 1 | 3 |
 
-下图来自原始 red_1_3 第 2 秒起的 0.6 s 回放片段，是 compare 工具实际发布的一帧：左侧传统方法得到 1 个有效检测，右侧 NN 得到 2 个，均使用同一输入图像。画面保留四点、帧内 ID、位姿轴和临时尺寸标记。平均处理耗时与测量范围见[第十点](#第十点全链路集成与性能)。
+下图来自原始 red_1_3 第 2 秒起的 0.6 s 回放片段，是 compare 工具实际发布的一帧：左侧传统方法得到 1 个有效检测，右侧 NN 得到 2 个，均使用同一输入图像。画面保留四点、帧内 ID 和位姿轴；截图中的 `provisional` 为采集时的旧尺寸标记。平均处理耗时与测量范围见[第十点](#第十点全链路集成与性能)。
 
 ![同帧检测对比：左传统、右神经网络](docs/images/detection_comparison.png)
 
@@ -250,6 +252,8 @@ NN 在几何判型之后可使用高置信编号修正大小板，并通过多�
 模型参考[同济 sp_vision_25 的两组几何建模](https://github.com/TongjiSuperPower/sp_vision_25/blob/bd9f5e7/tasks/auto_aim/target.cpp)，按本项目的相机 X-Z 旋转平面重新实现。用图像时间差预测，角度和角残差环绕到 ±π，换板保持车体 ID。默认半径 0.25 m 是初值，Δr、Δh 从零开始；几何初始方差、小幅随机游走噪声及范围在 [selector.yaml](src/ft_bringup/config/selector.yaml) 的 geometry 中设置。两组半径默认允许 0.05～0.50 m，|Δh|≤0.20 m。越界校正整组拒绝；观察量、转角或两组覆盖不足时显示 geometry warming up，不将初值称为实测尺寸。两板、三板模式只估计共同半径。
 
 首次选最近的有效板；已有轨迹时，将各模型槽位与同色观测配对，位置差门限为 0.40 m、角差门限为 0.70 rad。通过门限后，各槽位分别保留归一化位置误差和角误差平方和最小的候选，每帧只用一组观测校正，换槽位不更换车体 ID。
+
+角差门限必须小于 `π / plate_count`；动态调参界面的上限随板数设置，默认四板时略小于 0.7854 rad。
 
 当前板关联带有代价保持和换板冷却：当前槽位有合法观测时，冷却期间继续用它校正；冷却结束后，新板须有足够的代价优势才切换。当前槽位失配时绕过冷却，同帧尝试其他合法观测。启动配置位于 `selector.yaml` 的 `association_hysteresis`，推荐 `cost_margin=0.01`、`cooldown_s=0.02`。GUI 的 `Parameters → Rotating tracking` 可在线调整 `switch_cost_margin` 和 `switch_cooldown_s`，仅影响所选侧，重启恢复 YAML；冷却使用图像时间，两项均为 0 恢复原最低代价规则。实际片段、未来误差及限制见[选板保持对照](bonus/rotation_prediction/README.md#选板保持的连续片段对照)。
 
@@ -304,5 +308,4 @@ rosrun rqt_graph rqt_graph
 
 ## 参数依据与限制
 
-- **素材车辆的灯条尺寸：** 小板 135×56 mm、大板 230×56 mm 参考 Alliance2026 参数，未以素材实物的灯条中心距和发光长度校准，不能据此保证真实米制精度。
 - **旋转模型的车辆几何：** 半径 0.25 m 是初值，半径及两组差异由观测估计；约束范围、等角分布和相机系旋转轴近似尚未与素材实物核对，不能把滤波结果直接当作实测几何。

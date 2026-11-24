@@ -17,11 +17,10 @@ bool finiteVector(const cv::Vec3d& vector) {
   return std::isfinite(vector[0]) && std::isfinite(vector[1]) && std::isfinite(vector[2]);
 }
 
-// 已确认尺寸必须为正，未确认尺寸允许留零但不能为负或非有限值。
+// 物理尺寸必须有限且为正，避免无效尺度进入解算与投影。
 bool validDimensions(const ArmorDimensions& dimensions) {
   return std::isfinite(dimensions.width_m) && std::isfinite(dimensions.height_m) &&
-         dimensions.width_m >= 0.0 && dimensions.height_m >= 0.0 &&
-         (!dimensions.confirmed || (dimensions.width_m > 0.0 && dimensions.height_m > 0.0));
+         dimensions.width_m > 0.0 && dimensions.height_m > 0.0;
 }
 
 }  // namespace
@@ -60,9 +59,6 @@ bool PnpSolver::validCalibration(const CameraCalibration& camera) {
 // 根据板型生成米制物体点，与左上、右上、右下、左下的像素点对应。
 std::vector<cv::Point3d> PnpSolver::objectPoints(bool is_large) const {
   const auto& dimensions = is_large ? params_.large : params_.small;
-  if ((!dimensions.confirmed && !params_.allow_provisional_dimensions) ||
-      dimensions.width_m <= 0.0 || dimensions.height_m <= 0.0)
-    throw std::invalid_argument("Positive endpoint dimensions must be confirmed or explicitly allowed as provisional");
   const double half_width = dimensions.width_m / 2.0;
   const double half_height = dimensions.height_m / 2.0;
   // 原点在两灯中心连线中点，X 向右、Y 向下、Z=X×Y 指向板背后，单位米。
@@ -75,13 +71,6 @@ PnpResult PnpSolver::solve(const ArmorCandidate& armor, const CameraCalibration&
                           const ArmorPose* reference) const {
   PnpResult result;
   result.pose.id = armor.id;
-  // 尺寸未确认时，只有显式允许临时模型才继续解算。
-  const auto& dimensions = armor.is_large_armor ? params_.large : params_.small;
-  if (!dimensions.confirmed && (!params_.allow_provisional_dimensions ||
-      dimensions.width_m <= 0.0 || dimensions.height_m <= 0.0)) {
-    result.reason = "dimensions_unconfirmed"; return result;
-  }
-  result.provisional = !dimensions.confirmed;
   if (!validCalibration(camera)) { result.reason = "camera_model"; return result; }
 
   // 所有点必须在图内，构成方向和点序正确、边长足够的凸四边形。

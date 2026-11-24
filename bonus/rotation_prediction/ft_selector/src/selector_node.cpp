@@ -107,18 +107,16 @@ class SelectorNode {
     return params;
   }
 
-  // 尺寸直接读取同侧检测节点已加载的 PnP 配置，避免维护第二套物理尺寸。
+  // launch 将共享尺寸加载到本节点，独立启动时也不依赖检测节点的参数。
   void readDimensions() {
-    const ros::NodeHandle detector(ros::names::parentNamespace(private_nh_.getNamespace()) + "/ft_detector");
     for (int large = 0; large < 2; ++large) {
       const auto prefix = std::string("pnp/") + (large ? "large/" : "small/");
-      if (!detector.getParam(prefix + "width_m", widths_[large]) ||
-          !detector.getParam(prefix + "height_m", heights_[large]) ||
-          !std::isfinite(widths_[large]) || !std::isfinite(heights_[large]) ||
-          widths_[large] <= 0.0 || heights_[large] <= 0.0) {
-        widths_[large] = heights_[large] = 0.0;
-        ROS_WARN("PnP dimensions unavailable; prediction centers remain available without armor corners");
-      }
+      widths_[large] = required<double>(prefix + "width_m");
+      heights_[large] = required<double>(prefix + "height_m");
+      if (!std::isfinite(widths_[large]) || !std::isfinite(heights_[large]) ||
+          widths_[large] <= 0.0 || heights_[large] <= 0.0)
+        throw std::invalid_argument("Armor endpoint dimensions must be finite and positive: " +
+                                    private_nh_.resolveName(prefix));
     }
   }
 
@@ -139,6 +137,10 @@ class SelectorNode {
       throw std::invalid_argument("Selector YAML tuning is outside the UI range");
     const ros::NodeHandle tuning_nh(private_nh_, "tuning");
     tuning_server_.reset(new TuningServer(tuning_mutex_, tuning_nh));
+    // 相邻槽位的角度门限不能重叠，界面上限也严格小于 pi / 板数。
+    auto maximum = ft_selector::SelectorConfig::__getMax__();
+    maximum.association_yaw_rad = std::nextafter(std::acos(-1.0) / params_.circle.plate_count, 0.0);
+    tuning_server_->setConfigMax(maximum);
     tuning_server_->updateConfig(active_tuning_);
     tuning_server_->setConfigDefault(active_tuning_);
     tuning_server_->setCallback([this](ft_selector::SelectorConfig& config, std::uint32_t) {

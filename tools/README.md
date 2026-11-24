@@ -38,7 +38,7 @@ python3 tools/summarize_timings.py runs/red_4_tradition.csv runs/red_4_nn.csv --
 | --start | 0 | 距 bag 起点的秒数，必须非负 |
 | --duration | 1 | 处理片段的秒数，必须大于零 |
 
-run.sh 自动传入项目根目录。参数按 detector.yaml→model.yaml→数据集 YAML 合并，跟踪与选板分别读取 tracker.yaml、selector.yaml。基准使用启动配置，不读取在线调参界面的临时值。
+run.sh 自动传入项目根目录。参数按 detector.yaml→armor_dimensions.yaml→model.yaml→数据集 YAML 合并，跟踪与选板分别读取 tracker.yaml、selector.yaml。armor_dimensions.yaml 与在线节点共用，尺寸只维护一处。基准使用启动配置，不读取在线调参界面的临时值。
 
 传统与 NN 均使用各自 YAML 中的 ROI 配置，搜索历史从片段起点建立；比较相同帧时还需保持起点一致。检测计时包含选中模式的 ROI 规划、区域确认和坐标还原。
 

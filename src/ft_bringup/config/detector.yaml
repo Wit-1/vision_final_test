@@ -71,15 +71,9 @@ traditional:
   intervening_light_max_offset_ratio: 0.5
   pair_ambiguity_margin: 0.1
 
-# 3.1: endpoint-model geometry, in metres.
-# I chose endpoint dimensions from the Alliance2026 open-source project (2026-11-02).
-# Endpoint model: small 135x56 mm, large 230x56 mm.
-# Compatibility with the recorded targets has not been verified by measurement.
+# Endpoint dimensions are loaded from armor_dimensions.yaml by detector.launch.
 pnp:
   enabled: true
-  allow_provisional_dimensions: true
-  small: {width_m: 0.135, height_m: 0.056, confirmed: false}
-  large: {width_m: 0.230, height_m: 0.056, confirmed: false}
   min_depth_m: 0.05
   max_depth_m: 30.0
   max_reprojection_error_px: 3.0

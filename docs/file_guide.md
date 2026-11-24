@@ -72,7 +72,8 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 │       │   ├── prediction_overlay.launch # 独立预测投影入口
 │       │   └── visualization.launch
 │       ├── config/
-│       │   ├── detector.yaml         # 传统识别、几何、尺寸和队列参数
+│       │   ├── detector.yaml         # 传统识别、几何、PnP 门限和队列参数
+│       │   ├── armor_dimensions.yaml # 检测、选板与工具共用的物理尺寸
 │       │   ├── tracker.yaml          # Q/R、关联、丢失门限和 T
 │       │   ├── selector.yaml         # 旋转模型、关联和选板参数
 │       │   ├── model.yaml            # 模型路径、筛选和去重参数
@@ -246,7 +247,8 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [src/ft_bringup/launch/detector.launch](../src/ft_bringup/launch/detector.launch) | 依次加载公共/数据集配置并启动检测节点 | 1.4 |
 | [src/ft_bringup/launch/tracker.launch](../src/ft_bringup/launch/tracker.launch) | 加载跟踪参数并启动跟踪节点 | 6.5 |
 | [src/ft_bringup/launch/visualization.launch](../src/ft_bringup/launch/visualization.launch) | 分别控制图像、RViz 和动态调参窗口 | 1.4、7.1 |
-| [src/ft_bringup/config/detector.yaml](../src/ft_bringup/config/detector.yaml) | 公共话题、队列、HSV、几何、尺寸、PnP 和传统 ROI 参数 | 1～5、附加题 |
+| [src/ft_bringup/config/detector.yaml](../src/ft_bringup/config/detector.yaml) | 公共话题、队列、HSV、几何、PnP 门限和传统 ROI 参数 | 1～5、附加题 |
+| [src/ft_bringup/config/armor_dimensions.yaml](../src/ft_bringup/config/armor_dimensions.yaml) | 定义一的大小板灯条中心距与发光长度，检测、选板及工具共用 | 3.1、9.5、附加题 |
 | [src/ft_bringup/config/tracker.yaml](../src/ft_bringup/config/tracker.yaml) | Q/R、初始方差、关联/丢失门限、T 和 marker 参数 | 5.1、6.1～6.5 |
 | [src/ft_bringup/config/datasets/blue_1.yaml](../src/ft_bringup/config/datasets/blue_1.yaml) | blue_1 的 bag 文件名，沿用公共相机入口 | 1.4 |
 | [src/ft_bringup/config/datasets/blue_guard.yaml](../src/ft_bringup/config/datasets/blue_guard.yaml) | blue_guard 的 bag 文件名，沿用公共相机入口 | 1.4 |
@@ -272,7 +274,7 @@ vision_final_test/                     # 独立 Git 仓库、独立 catkin 工�
 | [src/ft_msgs/msg/Target.msg](../src/ft_msgs/msg/Target.msg) | 车体 ID、有效标志、当前板及未来板位置 | 9.5 |
 | [src/ft_msgs/msg/PredictionDebug.msg](../src/ft_msgs/msg/PredictionDebug.msg) | 源时间、预测时间、实际 T、板位姿、尺寸和半径/高度差估计 | 9.5、附加改进 |
 | [src/ft_bringup/config/selector.yaml](../src/ft_bringup/config/selector.yaml) | 圆周几何、EKF 噪声、关联、当前板保持与冷却、未来选板参数 | 9.1～9.5、附加题 |
-| [src/ft_bringup/launch/selector.launch](../src/ft_bringup/launch/selector.launch) | 启动选板并读取与单板跟踪相同的提前量 | 9.5 |
+| [src/ft_bringup/launch/selector.launch](../src/ft_bringup/launch/selector.launch) | 加载选板参数、共享物理尺寸和与单板跟踪相同的提前量，可独立启动 | 9.5 |
 | [tools/CMakeLists.txt](../tools/CMakeLists.txt) | 链接现有算法库，独立构建性能基准 | 10.2 |
 | [tools/README.md](../tools/README.md) | 性能工具的构建、参数、CSV 字段和统计范围 | 10.2 |
 | [tools/benchmark_pipeline.cpp](../tools/benchmark_pipeline.cpp) | 顺序读取原始 bag 并测量算法阶段耗时，输出逐帧 CSV | 10.2 |

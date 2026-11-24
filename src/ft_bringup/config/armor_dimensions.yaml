@@ -1,0 +1,5 @@
+# Definition 1: light-bar centre spacing and luminous length, in metres.
+# Confirmed dimensions: small 135x60 mm, large 230x60 mm.
+pnp:
+  small: {width_m: 0.135, height_m: 0.060}
+  large: {width_m: 0.230, height_m: 0.060}

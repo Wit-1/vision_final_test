@@ -60,12 +60,6 @@ class DetectorNode {
     pose_history_.reset(new ft_detector::PoseHistory(
         requiredParam<double>("pnp/continuity/max_gap_s"),
         requiredParam<double>("pnp/continuity/max_corner_shift_ratio")));
-    if (pnp_enabled_ && (!pnp_params.small.confirmed || !pnp_params.large.confirmed)) {
-      if (pnp_params.allow_provisional_dimensions)
-        ROS_WARN("Provisional endpoint dimensions are enabled; pose/TF metric scale remains unverified");
-      else
-        ROS_WARN("Unconfirmed endpoint dimensions: affected armor classes will not publish a pose or TF");
-    }
     // 队列和传输方式由 YAML 控制，启动时拒绝无效配置。
     const auto transport = requiredParam<std::string>("image_transport");
     const int image_queue = requiredParam<int>("image_queue_size");
@@ -157,16 +151,15 @@ class DetectorNode {
     return params;
   }
 
-  // 读取大小板尺寸、临时尺寸开关以及深度、重投影和绘轴门限。
+  // 读取大小板端点尺寸以及深度、重投影和绘轴门限。
   ft_detector::PnpParams loadPnpParams() const {
     const auto dimensions = [this](const std::string& name) {
       return ft_detector::ArmorDimensions{requiredParam<double>(name + "/width_m"),
-          requiredParam<double>(name + "/height_m"), requiredParam<bool>(name + "/confirmed")};
+          requiredParam<double>(name + "/height_m")};
     };
     ft_detector::PnpParams params;
     params.small = dimensions("pnp/small");
     params.large = dimensions("pnp/large");
-    params.allow_provisional_dimensions = requiredParam<bool>("pnp/allow_provisional_dimensions");
     params.ambiguity_error_margin_px = requiredParam<double>("pnp/continuity/error_margin_px");
     params.min_depth_m = requiredParam<double>("pnp/min_depth_m");
     params.max_depth_m = requiredParam<double>("pnp/max_depth_m");
@@ -344,11 +337,9 @@ class DetectorNode {
         evaluation.poses[i] = pnp_solver_->solve(armors[i], calibration_, references[i]);
       if (pose_continuity_enabled_) pose_history_->store(armors, evaluation.poses, stamp);
       evaluation.status = evaluation.poses.empty() ? "no_candidates" : evaluation.poses.front().reason;
-      // 汇总 ready/provisional 状态，便于在图像中说明米制模型来源。
+      // 存在有效位姿时显示 ready，否则保留失败原因。
       if (std::any_of(evaluation.poses.begin(), evaluation.poses.end(), [](const auto& pose) { return pose.valid; })) {
-        const bool provisional = std::any_of(evaluation.poses.begin(), evaluation.poses.end(),
-            [](const auto& pose) { return pose.valid && pose.provisional; });
-        evaluation.status = provisional ? "provisional" : "ready";
+        evaluation.status = "ready";
       }
     }
     if (!pnp_enabled_ || !pose_continuity_enabled_) pose_history_->reset();

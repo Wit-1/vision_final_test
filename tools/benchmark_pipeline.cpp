@@ -132,17 +132,16 @@ ft_detector::RoiParams traditionalRoiParams(const YAML::Node& config) {
   return params;
 }
 
-// 读取大小板尺寸、临时尺寸开关与 PnP 筛选条件。
+// 读取大小板端点尺寸与 PnP 筛选条件，与在线节点使用同一套配置。
 ft_detector::PnpParams poseParams(const YAML::Node& config) {
   const auto dimensions = [&](const std::string& size) {
     const auto prefix = "pnp/" + size;
     return ft_detector::ArmorDimensions{required<double>(config, prefix + "/width_m"),
-        required<double>(config, prefix + "/height_m"), required<bool>(config, prefix + "/confirmed")};
+        required<double>(config, prefix + "/height_m")};
   };
   ft_detector::PnpParams params;
   params.small = dimensions("small");
   params.large = dimensions("large");
-  params.allow_provisional_dimensions = required<bool>(config, "pnp/allow_provisional_dimensions");
   params.ambiguity_error_margin_px = required<double>(config, "pnp/continuity/error_margin_px");
   params.min_depth_m = required<double>(config, "pnp/min_depth_m");
   params.max_depth_m = required<double>(config, "pnp/max_depth_m");
@@ -262,6 +261,7 @@ void run(const Options& options) {
   const auto package = options.project / "src/ft_bringup";
   const auto config_dir = package / "config";
   auto config = YAML::LoadFile((config_dir / "detector.yaml").string());
+  merge(config, YAML::LoadFile((config_dir / "armor_dimensions.yaml").string()));
   merge(config, YAML::LoadFile((config_dir / "model.yaml").string()));
   merge(config, YAML::LoadFile((config_dir / "datasets" / (options.dataset + ".yaml")).string()));
   const auto linear_config = YAML::LoadFile((config_dir / "tracker.yaml").string());

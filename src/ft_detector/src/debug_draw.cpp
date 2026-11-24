@@ -91,11 +91,10 @@ void drawPoses(cv::Mat& debug, const std::vector<PnpResult>& poses,
     for (std::size_t i = 0; i < 3; ++i) {
       cv::line(debug, origin, pose.axis_pixels[i + 1], colors[i], 2, cv::LINE_AA);
     }
-    // 临时尺寸和历史选解状态也写入标签，便于观察实际解算条件。
+    // 显示深度、重投影误差和历史选解状态。
     std::ostringstream label;
     label << std::fixed << std::setprecision(2) << "Z=" << pose.tvec[2]
           << "m e=" << pose.reprojection_error_px << "px";
-    if (result.provisional) label << " (provisional)";
     if (result.continuity_selected) label << " (prior)";
     cv::putText(debug, label.str(), origin + cv::Point(0, 22), cv::FONT_HERSHEY_SIMPLEX,
                 0.45, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
